@@ -26,17 +26,6 @@ Open the settings with `/willomuter` (or the plugin's settings button in `/xlplu
 
 Your original volume is always restored when the plugin is turned off, unloaded or the game restarts.
 
-## Releasing a new version (for the author)
-
-Commit your changes, then push a version tag. GitHub builds the plugin, creates a release and updates `repo.json` automatically:
-
-```
-git push
-git tag v1.0.1
-git push --tags
-```
-
-The commit messages since the previous tag become the changelog shown in Dalamud (and in Will-o-Patchwisp).
 
 ## AI usage
 
