@@ -1,0 +1,15 @@
+{
+  "Author": "NeonGhostCinnamon",
+  "Name": "Will-o-Muter",
+  "Punchline": "Mutes the ambient sounds when a crowd gathers around you.",
+  "Description": "Tired of noisy crowds? Will-o-Muter mutes the Ambient Sounds channel when many players are nearby and restores your volume once the crowd thins out. Open the settings with /willomuter.",
+  "Tags": [
+    "sound",
+    "ambient",
+    "crowd",
+    "utility"
+  ],
+  "RepoUrl": "https://github.com/NeonGhostCinnamon/WillOMuter",
+  "IconUrl": "https://raw.githubusercontent.com/NeonGhostCinnamon/WillOMuter/HEAD/images/icon.png",
+  "ApplicableVersion": "any"
+}
