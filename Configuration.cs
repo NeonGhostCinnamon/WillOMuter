@@ -6,7 +6,7 @@ namespace WillOMuter;
 [Serializable]
 public class Configuration : IPluginConfiguration
 {
-    public int Version { get; set; } = 1;
+    public int Version { get; set; } = 2;
 
     /// <summary>Whether Will-o-Muter is enabled.</summary>
     public bool Enabled { get; set; } = true;
@@ -23,10 +23,21 @@ public class Configuration : IPluginConfiguration
     /// <summary>Seconds the area must stay below the unmute level before volume is restored.</summary>
     public float UnmuteDelaySeconds { get; set; } = 3f;
 
-    /// <summary>Dark (default) or light theme, like Will-o-Patchwisp.</summary>
+    /// <summary>Old dark/light switch, only read once to move existing setups to <see cref="ThemeChoice"/>.</summary>
     public bool DarkMode { get; set; } = true;
+
+    /// <summary>Dark (default), Light or Dalamud, like Will-o-Patchwisp.</summary>
+    public ThemeMode ThemeChoice { get; set; } = ThemeMode.Dark;
 
     // Persisted so a crash while muted doesn't leave your ambient volume at 0.
     public bool IsMuted { get; set; } = false;
     public uint SavedVolume { get; set; } = 100;
+}
+
+/// <summary>The window's look: the website's dark or light colours, or Dalamud's own style.</summary>
+public enum ThemeMode
+{
+    Dark,
+    Light,
+    Dalamud,
 }

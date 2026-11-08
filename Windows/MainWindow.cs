@@ -52,7 +52,7 @@ public sealed class MainWindow : Window
 
     public override void PreDraw()
     {
-        Theme.Dark = Config.DarkMode;
+        Theme.Mode = Config.ThemeChoice;
 
         if (dragging && !ImGui.IsMouseDown(ImGuiMouseButton.Left))
             dragging = false;
@@ -161,20 +161,19 @@ public sealed class MainWindow : Window
         var y = top.Y + Math.Max(0, (headingH - d) / 2f);
         var right = ImGui.GetWindowContentRegionMax().X;
 
-        ImGui.SetCursorPos(new Vector2(right - buttonsW, y));
+        ImGui.SetCursorPos(new Vector2(right - d * 2 - gap, y));
         if (Theme.IconCircle("##min", FontAwesomeIcon.Minus, Theme.Text, d))
             SetMinimized(true);
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Minimize");
 
-        ImGui.SetCursorPos(new Vector2(right - d * 2 - gap, y));
-        if (Theme.IconCircle("##mode", Config.DarkMode ? FontAwesomeIcon.Moon : FontAwesomeIcon.Sun, Config.DarkMode ? Theme.Moon : Theme.Amber, d))
+        ImGui.SetCursorPos(new Vector2(right - buttonsW, y));
+        var mode = Config.ThemeChoice;
+        if (Theme.ThemeButton("##theme", ref mode, d))
         {
-            Config.DarkMode = !Config.DarkMode;
+            Config.ThemeChoice = mode;
             plugin.Save();
         }
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Config.DarkMode ? "Switch to light mode" : "Switch to dark mode");
 
         ImGui.SetCursorPos(new Vector2(right - d, y));
         if (Theme.IconCircle("##close", FontAwesomeIcon.Times, Theme.Text, d))
@@ -217,7 +216,7 @@ public sealed class MainWindow : Window
         ImGui.AlignTextToFramePadding();
         ImGui.TextColored(Theme.Text, "Will-");
         ImGui.SameLine(0, 0);
-        Theme.DanglingText("o", Theme.Pink);
+        Theme.DanglingText("o", Theme.BrandPink);
         ImGui.SameLine(0, 0);
         ImGui.TextColored(Theme.Text, "-Muter");
 
@@ -278,9 +277,9 @@ public sealed class MainWindow : Window
             var count = Plugin.LastCount;
             using (plugin.TitleFont.Available ? plugin.TitleFont.Push() : null)
             {
-                ImGui.TextColored(count >= Config.MuteAtPlayers ? Theme.Pink : Theme.Text, count.ToString());
+                ImGui.TextColored(count >= Config.MuteAtPlayers ? Theme.AccentText : Theme.Text, count.ToString());
                 ImGui.SameLine(0, S(6));
-                ImGui.TextColored(Theme.Pink, "/");
+                ImGui.TextColored(Theme.AccentText, "/");
                 ImGui.SameLine(0, S(6));
                 ImGui.TextColored(Theme.Muted, Config.MuteAtPlayers.ToString());
             }

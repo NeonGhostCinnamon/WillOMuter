@@ -43,6 +43,14 @@ public sealed class Plugin : IDalamudPlugin
     {
         config = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
 
+        // v2: the dark/light switch became a theme choice (Dark, Light or Dalamud).
+        if (config.Version < 2)
+        {
+            config.ThemeChoice = config.DarkMode ? ThemeMode.Dark : ThemeMode.Light;
+            config.Version = 2;
+            PluginInterface.SavePluginConfig(config);
+        }
+
         // Recover from a crash/force-quit that happened while muted.
         if (config.IsMuted)
         {
