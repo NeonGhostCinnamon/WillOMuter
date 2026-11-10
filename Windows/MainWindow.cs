@@ -135,7 +135,6 @@ public sealed class MainWindow : Window
         }
 
         DrawHeader();
-        Theme.CenteredText("A quieter Eorzea.", Theme.TextSoft);
         Theme.AccentBar();
         ImGuiHelpers.ScaledDummy(4f);
 
