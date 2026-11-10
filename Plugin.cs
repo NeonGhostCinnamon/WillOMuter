@@ -140,8 +140,12 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
-        // Don't overwrite a good saved value with 0 if something else already muted it.
-        if (current > 0) config.SavedVolume = current;
+        // Ambient sounds are already at 0 (turned down by the player): nothing to mute, and nothing to
+        // "restore" later. Muting here would bring them back at the old saved volume once the crowd leaves.
+        if (current == 0)
+            return;
+
+        config.SavedVolume = current;
 
         GameConfig.Set(SystemConfigOption.SoundEnv, 0u);
         config.IsMuted = true;
