@@ -390,7 +390,7 @@ internal static class Theme
     /// Round glass button with a Font Awesome icon in the middle (used for the sun/moon theme switch).
     /// Border turns pink on hover, like the cards.
     /// </summary>
-    public static bool IconCircle(string id, FontAwesomeIcon icon, Vector4 iconColor, float diameter, bool pinkStroke = true)
+    public static bool IconCircle(string id, FontAwesomeIcon icon, Vector4 iconColor, float diameter, bool pinkStroke = true, bool filled = false)
     {
         var pos = ImGui.GetCursorScreenPos();
         var clicked = ImGui.InvisibleButton(id, new Vector2(diameter, diameter));
@@ -400,8 +400,16 @@ internal static class Theme
         var dl = ImGui.GetWindowDrawList();
         var center = pos + new Vector2(diameter / 2f);
         var radius = diameter / 2f;
-        var fill = ImGui.GetColorU32(active ? GlassHover with { W = GlassHover.W + 0.06f } : hovered ? GlassHover : Glass);
-        if (UseDalamud)
+        var fill = ImGui.GetColorU32(filled
+            ? (active ? ButtonPressed : hovered ? ButtonHover : Pink)
+            : active ? GlassHover with { W = GlassHover.W + 0.06f } : hovered ? GlassHover : Glass);
+        if (filled && !UseDalamud)
+        {
+            // Filled pink with a white outline, like the "Muted" badge.
+            dl.AddCircleFilled(center, radius, fill, 32);
+            dl.AddCircle(center, radius - 1f, ImGui.GetColorU32(Outline), 32, S(1.5f));
+        }
+        else if (UseDalamud)
         {
             // Dalamud theme: a small rounded square like Dalamud's own buttons.
             dl.AddRectFilled(pos, pos + new Vector2(diameter), fill, R(0));

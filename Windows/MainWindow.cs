@@ -291,20 +291,42 @@ public sealed class MainWindow : Window
             var (label, on) = StatusText();
             var icon = !Config.Enabled ? FontAwesomeIcon.PowerOff : on ? FontAwesomeIcon.VolumeMute : FontAwesomeIcon.VolumeUp;
             var h = ImGui.GetFrameHeight() + S(8);
-            var w = Theme.StatusBadgeWidth(icon, label);
+            var gap = S(8);
+            var w = h + gap + Theme.StatusBadgeWidth(icon, label);
             var after = ImGui.GetCursorScreenPos();
             if (right - left > w + S(150))
             {
                 ImGui.SetCursorScreenPos(new Vector2(right - w, top + (bottom - top - h) / 2f));
+                DrawPowerButton(h);
+                ImGui.SameLine(0, gap);
                 Theme.StatusBadge(icon, label, on, h);
                 ImGui.SetCursorScreenPos(after);
                 ImGui.Dummy(Vector2.Zero);
             }
             else
             {
-                Theme.StatusBadge(icon, label, on, h);   // narrow window: under the count
+                // Narrow window: under the count.
+                DrawPowerButton(h);
+                ImGui.SameLine(0, gap);
+                Theme.StatusBadge(icon, label, on, h);
             }
         });
+    }
+
+    /// <summary>Round power button next to the status badge: turns Will-o-Muter off, or (filled pink) back on.</summary>
+    private void DrawPowerButton(float diameter)
+    {
+        var enabled = Config.Enabled;
+        var clicked = enabled
+            ? Theme.IconCircle("##power", FontAwesomeIcon.PowerOff, Theme.Text, diameter)
+            : Theme.IconCircle("##power", FontAwesomeIcon.PowerOff, Theme.OnPink, diameter, filled: true);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(enabled ? "Disable Will-o-Muter" : "Enable Will-o-Muter");
+        if (clicked)
+        {
+            Config.Enabled = !enabled;
+            plugin.Save();
+        }
     }
 
     // ---------------------------------------------------------------- settings card
@@ -379,38 +401,7 @@ public sealed class MainWindow : Window
     {
         ImGuiHelpers.ScaledDummy(2f);
         var spacing = ImGui.GetStyle().ItemSpacing.X;
-        var avail = ImGui.GetContentRegionAvail().X;
-        var linkW = S(96);
-        var h = ImGui.GetFrameHeight() + S(4);
-
-        // Enable / disable (pink when it would turn the plugin back on)
-        var enabled = Config.Enabled;
-        var toggleLabel = enabled ? "Disable Will-o-Muter" : "Enable Will-o-Muter";
-        var toggleW = Math.Max(S(170), avail - (linkW * 2 + spacing * 2));
-        var oneRow = toggleW + linkW * 2 + spacing * 2 <= avail + 0.5f;
-        if (!oneRow)
-            toggleW = avail;
-
-        bool clicked;
-        if (enabled)
-        {
-            clicked = Theme.LinkButton("##toggle", FontAwesomeIcon.PowerOff, toggleLabel, width: toggleW);
-        }
-        else
-        {
-            using (ImRaii.PushStyle(ImGuiStyleVar.FrameRounding, S(10)))
-                clicked = Theme.Button(toggleLabel, new Vector2(toggleW, h));
-        }
-        if (clicked)
-        {
-            Config.Enabled = !enabled;
-            plugin.Save();
-        }
-
-        if (oneRow)
-            ImGui.SameLine();
-        else
-            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + Math.Max(0, (avail - (linkW * 2 + spacing)) / 2f));
+        var linkW = Math.Max(S(96), (ImGui.GetContentRegionAvail().X - spacing) / 2f);
 
         if (Theme.LinkButton("##kofi", FontAwesomeIcon.Coffee, "Ko-fi", rainbow: true, width: linkW))
             Util.OpenLink(Theme.KofiUrl);
