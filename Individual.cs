@@ -137,6 +137,11 @@ public sealed unsafe class Individual : IDisposable
     private Dictionary<nint, nint> emoteDrawOwner = new(); // draw object -> character, for people with "Emotes" muted
 
     private nint localPlayer;
+    // Copy of the Emotes tab's choices for the sound functions (some run off the game's main thread, so they
+    // never read the settings list while the window changes it).
+    private HashSet<uint> mutedEmotes = new();
+    private bool emotesOn;
+    private DateTime lastHookError = DateTime.MinValue;
     private DateTime lastScan = DateTime.MinValue;
 
     /// <summary>Whether muting voices works (false when the game function couldn't be found, e.g. right after a patch).</summary>
@@ -329,6 +334,10 @@ public sealed unsafe class Individual : IDisposable
     public void Update()
     {
         localPlayer = objects.LocalPlayer?.Address ?? 0;
+        var on = config.AllEnabled && config.EmotesEnabled && config.MutedEmotes.Count > 0;
+        if (on && (!emotesOn || !mutedEmotes.SetEquals(config.MutedEmotes)))
+            mutedEmotes = new HashSet<uint>(config.MutedEmotes);
+        emotesOn = on;
         var listOn = config.AllEnabled && config.IndividualEnabled && config.MutedPeople.Count > 0;
         var rulesOn = config.AllEnabled && config.RaceRulesEnabled
                       && config.RaceRules.Any(r => r.Enabled && (r.MuteVoices || r.MuteFootsteps || r.MuteSkills));
@@ -426,17 +435,33 @@ public sealed unsafe class Individual : IDisposable
 
     /// <summary>Emotes tab: is this player doing an emote that's muted for everyone?</summary>
     private bool EmoteMuted(Character* owner)
-        => config.AllEnabled && config.EmotesEnabled && config.MutedEmotes.Count > 0
+        => emotesOn
            && owner->GameObject.ObjectKind == FFXIVClientStructs.FFXIV.Client.Game.Object.ObjectKind.Pc
            && (config.EmotesMuteSelf || (nint)owner != localPlayer)
            && owner->EmoteController.EmoteId != 0
-           && config.MutedEmotes.Contains(owner->EmoteController.EmoteId);
+           && mutedEmotes.Contains(owner->EmoteController.EmoteId);
+
+    /// <summary>Anything to check at all? When nobody nearby is muted, the sound functions just play.</summary>
+    private bool AnythingMuted => emotesOn || mutedObjects.Count > 0 || mutedSkills.Count > 0 || mutedSkillDraw.Count > 0;
+
+    /// <summary>
+    /// The sound functions run many times a frame; if something keeps failing, write it to the log at most once
+    /// every 30 seconds so the log can't slow the game down.
+    /// </summary>
+    private void HookError(Exception ex, string message)
+    {
+        var now = DateTime.UtcNow;
+        if ((now - lastHookError).TotalSeconds < 30)
+            return;
+        lastHookError = now;
+        log.Error(ex, message);
+    }
 
     private void ClipUpdateDetour(nint clipScheduler)
     {
         try
         {
-            if (clipScheduler != 0 && (mutedObjects.Count > 0 || (config.EmotesEnabled && config.MutedEmotes.Count > 0)))
+            if (clipScheduler != 0 && (mutedObjects.Count > 0 || emotesOn))
             {
                 var owner = ClipOwner(clipScheduler);
                 if (owner != null)
@@ -454,7 +479,7 @@ public sealed unsafe class Individual : IDisposable
         }
         catch (Exception ex)
         {
-            log.Error(ex, "Checking an emote's timeline failed; letting it play.");
+            HookError(ex, "Checking an emote's timeline failed; letting it play.");
         }
         clipHook!.Original(clipScheduler);
     }
@@ -487,7 +512,7 @@ public sealed unsafe class Individual : IDisposable
         }
         catch (Exception ex)
         {
-            log.Error(ex, "Checking a footstep failed; letting it play.");
+            HookError(ex, "Checking a footstep failed; letting it play.");
         }
         footstepHook!.Original(gameObject, id, unk);
     }
@@ -496,7 +521,7 @@ public sealed unsafe class Individual : IDisposable
     {
         try
         {
-            if (self != 0)
+            if (self != 0 && AnythingMuted)
             {
                 var (ownerPtr, draw) = AnimationSoundOwner(self);
                 var mute = false;
@@ -524,7 +549,7 @@ public sealed unsafe class Individual : IDisposable
         }
         catch (Exception ex)
         {
-            log.Error(ex, "Checking a skill or emote sound failed; letting it play.");
+            HookError(ex, "Checking a skill or emote sound failed; letting it play.");
         }
         return skillHook!.Original(self, unused, timeOffset);
     }
@@ -559,7 +584,7 @@ public sealed unsafe class Individual : IDisposable
     {
         try
         {
-            if (self != null && self->OwnerObject != null)
+            if (self != null && self->OwnerObject != null && (mutedObjects.Count > 0 || emotesOn))
             {
                 var owner = self->OwnerObject;
                 if (mutedObjects.Count > 0 && mutedObjects.Contains((nint)owner))
@@ -578,7 +603,7 @@ public sealed unsafe class Individual : IDisposable
         }
         catch (Exception ex)
         {
-            log.Error(ex, "Checking a character sound failed; letting it play.");
+            HookError(ex, "Checking a character sound failed; letting it play.");
         }
 
         return voiceHook!.Original(self, soundNumber, unk2, gameObject, autoRelease, weaponDataIndex, unk6, unk7);
