@@ -4,49 +4,46 @@
 
 <br><br>
 
-<a href="#install"><img src="images/readme/btn-install.svg" alt="Install in Dalamud" height="46"></a>&nbsp;
+<a href="#how-to-install"><img src="images/readme/btn-install.svg" alt="Install in Dalamud" height="46"></a>&nbsp;
 <a href="https://github.com/NeonGhostCinnamon/WillOPlugins"><img src="images/readme/btn-plugins.svg" alt="All my plugins" height="46"></a>
-
-<br><br>
-
-<img src="images/readme/features.svg" alt="How it works" width="100%">
 
 </div>
 
-Tired of noisy crowds? **Will-o-Muter** mutes the **Ambient Sounds** channel when too many players are nearby, and restores your volume once the crowd thins out. Your original volume always comes back when the plugin is turned off, unloaded or the game restarts.
+## Usage
 
-*(Formerly CrowdMute.)*
+I've created these plugins for my own use, but figured I might as well release them on GitHub. They're not as fancy as "proper" plugins, but I hope you can make good use of them too!
 
+## Description
+
+Will-o-Muter mutes the Ambient Sounds channel when a crowd gathers around you, and brings your volume back once it thins out.
+
+<details>
+<summary><b>More details and settings</b></summary>
 <br>
 
-<a name="install"></a>
-<div align="center"><img src="images/readme/install.svg" alt="How to install" width="100%"></div>
+- **Mute when at least** a number of players are nearby, counting only players within a **radius** you choose.
+- **Unmute margin** and **unmute delay**, so it doesn't flicker on and off at the edge of a crowd.
+- Your own volume always comes back: when you turn it off, when the plugin unloads, even after a crash. Change the volume yourself while it's muted and it keeps yours.
+- **Server info bar**: "Muting crowd · 14" at the top right of your screen (also usable in Umbra). Choose your own text and colour, show it always or only while muting, and click it to turn Will-o-Muter on or off.
+- Dark, light or Dalamud theme.
+
+</details>
+
+## How to install
 
 1. In game, type `/xlsettings` and open the **Experimental** tab.
-2. Under **Custom Plugin Repositories**, paste this URL from [Will-o-Plugins](https://github.com/NeonGhostCinnamon/WillOPlugins) (it has all of my plugins), click **+**, tick **Enabled** and click **Save and Close**:
+2. Under **Custom Plugin Repositories**, paste this URL, click **+**, tick **Enabled** and click **Save and Close**:
 
    ```
    https://raw.githubusercontent.com/NeonGhostCinnamon/WillOPlugins/HEAD/repo.json
    ```
 
 3. Type `/xlplugins`, search for **Will-o-Muter** and install it.
-4. Open the settings with **`/willomuter`** (or the settings button in `/xlplugins`).
+4. Open it any time with `/willomuter`.
 
-<br>
+## AI Disclosure
 
-<div align="center">
-
-<img src="images/readme/usage.svg" alt="The settings" width="100%">
-
-<img src="images/readme/grid.svg" alt="Mute at least, Unmute margin, Radius and Unmute delay" width="100%">
-
-</div>
-
-<br>
-
-<div align="center"><img src="images/readme/ai.svg" alt="AI disclosure" width="100%"></div>
-
-This plugin was written with the help of AI.
+This plugin was written and tested with the help of AI.
 
 <br>
 
