@@ -1,7 +1,7 @@
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
     <Version>1.2.0.0</Version>
-    <Description>Tired of noisy crowds? Will-o-Muter mutes the ambient sounds when a crowd gathers, and can silence specific people, whole races or genders, and emotes you never want to hear. Open the settings with /willomuter.</Description>
+    <Description>Annoyed by certain people or emotes? Want to disable the yelps and whines of the ambient crowd noises? Enjoy this one~&#10;/willomuter to open settings</Description>
     <PackageProjectUrl>https://github.com/NeonGhostCinnamon/WillOMuter</PackageProjectUrl>
     <IsPackable>false</IsPackable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>

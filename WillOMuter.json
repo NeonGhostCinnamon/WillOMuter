@@ -2,7 +2,7 @@
   "Author": "NeonGhostCinnamon",
   "Name": "Will-o-Muter",
   "Punchline": "Mutes noisy crowds, specific people and the emotes you never want to hear.",
-  "Description": "Tired of noisy crowds? Will-o-Muter mutes the Ambient Sounds channel when many players are nearby and restores your volume once the crowd thins out.\n\nIt can also silence the voices of specific people (right-click them in chat or in the world), everyone of a race or gender, and emotes you pick, with a WhiteList for people who should never be muted.\n\nOpen the settings with /willomuter.",
+  "Description": "Annoyed by certain people or emotes? Want to disable the yelps and whines of the ambient crowd noises? Enjoy this one~\n/willomuter to open settings",
   "Tags": [
     "sound",
     "ambient",
