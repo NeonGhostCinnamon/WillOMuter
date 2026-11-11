@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Linq;
 using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
@@ -39,7 +41,7 @@ public sealed class MainWindow : Window
     private Vector2 miniSize = new(260, 34);
 
     public MainWindow(Plugin plugin)
-        : base("Will-o-Muter##WillOMuterMain", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoMove)
+        : base($"Will-o-Muter##{Plugin.Id}Main", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoMove)
     {
         this.plugin = plugin;
         Size = new Vector2(440, 640);
@@ -138,17 +140,39 @@ public sealed class MainWindow : Window
         Theme.AccentBar();
         ImGuiHelpers.ScaledDummy(4f);
 
-        DrawStatusCard();
+        DrawQuickAccess();
         using (var bar = ImRaii.TabBar("##tabs"))
         {
             if (bar.Success)
             {
-                using (var tab = ImRaii.TabItem("Muting"))
+                var peopleFlags = selectPeopleTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
+                selectPeopleTab = false;
+                using (var tab = ImRaii.TabItem("Crowd"))
                 {
                     if (tab.Success)
                     {
                         ImGuiHelpers.ScaledDummy(2f);
-                        DrawSettingsCard();
+                        OffNote();
+                        DrawAmbientCard();
+                        DrawRacesCard();
+                    }
+                }
+                using (var tab = ImRaii.TabItem("People", peopleFlags))
+                {
+                    if (tab.Success)
+                    {
+                        ImGuiHelpers.ScaledDummy(2f);
+                        OffNote();
+                        DrawPeopleCard();
+                    }
+                }
+                using (var tab = ImRaii.TabItem("Emotes"))
+                {
+                    if (tab.Success)
+                    {
+                        ImGuiHelpers.ScaledDummy(2f);
+                        OffNote();
+                        DrawEmotesCard();
                     }
                 }
                 using (var tab = ImRaii.TabItem("Settings"))
@@ -157,11 +181,13 @@ public sealed class MainWindow : Window
                     {
                         ImGuiHelpers.ScaledDummy(2f);
                         DrawServerBarCard();
+                        DrawImportExportCard();
                     }
                 }
             }
         }
         DrawFooter();
+        fileDialog.Draw();
     }
 
     // ---------------------------------------------------------------- header
@@ -280,57 +306,327 @@ public sealed class MainWindow : Window
     }
 
     private (string Label, bool On) StatusText()
-        => !Config.Enabled ? ("Off", false) : Config.IsMuted ? ("Muted", true) : ("Unmuted", false);
+        => !Config.Enabled || !Config.AllEnabled ? ("Off", false) : Config.IsMuted ? ("Muted", true) : ("Unmuted", false);
 
-    // ---------------------------------------------------------------- status card
+    // ---------------------------------------------------------------- quick access
 
-    private void DrawStatusCard()
+    private bool selectPeopleTab;
+    private bool showWhiteList;
+
+    /// <summary>Above the tabs: mute your target, jump to the MuteList or WhiteList, and whether it's muting now.</summary>
+    private void DrawQuickAccess()
     {
-        Theme.Card("status", () =>
+        var ind = plugin.Individual;
+        Theme.Card("quick", () =>
+        {
+            var spacing = ImGui.GetStyle().ItemSpacing.X;
+            var d = ImGui.GetFrameHeight();
+            var all = Config.AllEnabled;
+            var power = all
+                ? Theme.IconCircle("##all", FontAwesomeIcon.PowerOff, Theme.Text, d)
+                : Theme.IconCircle("##all", FontAwesomeIcon.PowerOff, Theme.OnPink, d, filled: true);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip(all ? "Turn everything in Will-o-Muter off\n(crowd, people, races, emotes and the server info bar)." : "Will-o-Muter is off. Click to turn everything back on.");
+            if (power)
+            {
+                Config.AllEnabled = !all;
+                plugin.Save();
+                ind.Refresh();
+            }
+            ImGui.SameLine();
+
+            var w = (Theme.CardInnerRight - ImGui.GetCursorScreenPos().X - spacing * 2) / 3f;
+            var target = Plugin.Targets.Target as Dalamud.Game.ClientState.Objects.SubKinds.IPlayerCharacter;
+            var onList = target != null ? ind.Find(target.Name.TextValue, target.HomeWorld.RowId) : null;
+            using (ImRaii.Disabled(target == null))
+            {
+                if (Theme.Button(onList != null ? "Unmute target" : "Mute target", new Vector2(w, 0)))
+                {
+                    if (onList != null) ind.Remove(onList);
+                    else ind.Add(target!.Name.TextValue, target.HomeWorld.RowId, target.HomeWorld.ValueNullable?.Name.ExtractText() ?? string.Empty);
+                }
+            }
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                ImGui.SetTooltip(target == null ? "Target a player first." : onList != null ? $"Take {target.Name.TextValue} off the MuteList." : $"Add {target.Name.TextValue} to the MuteList.");
+            ImGui.SameLine();
+            if (OutlineButton($"MuteList ({Config.MutedPeople.Count})", w))
+            {
+                selectPeopleTab = true;
+                showWhiteList = false;
+            }
+            ImGui.SameLine();
+            if (OutlineButton($"WhiteList ({Config.WhiteList.Count})", w))
+            {
+                selectPeopleTab = true;
+                showWhiteList = true;
+            }
+        });
+    }
+
+    /// <summary>Card heading in the rounded title font, pink (Crowd, Emotes).</summary>
+    private void CardTitle(string text)
+    {
+        using (plugin.TitleFont.Available ? plugin.TitleFont.Push() : null)
+        {
+            ImGui.SetWindowFontScale(0.6f);
+            ImGui.TextColored(Theme.AccentText, text);
+            ImGui.SetWindowFontScale(1f);
+        }
+    }
+
+    /// <summary>Shown at the top of every tab while everything is turned off.</summary>
+    private void OffNote()
+    {
+        if (Config.AllEnabled)
+            return;
+        Theme.Wrapped("Will-o-Muter is off. Turn it back on with the power button at the top.", Theme.Amber);
+        ImGuiHelpers.ScaledDummy(2f);
+    }
+
+    /// <summary>Rounded button with a pink outline (not filled).</summary>
+    private static bool OutlineButton(string label, float width)
+    {
+        var h = ImGui.GetFrameHeight();
+        var pos = ImGui.GetCursorScreenPos();
+        var clicked = ImGui.InvisibleButton("##" + label, new Vector2(width, h));
+        var hovered = ImGui.IsItemHovered();
+        var dl = ImGui.GetWindowDrawList();
+        var round = Theme.UseDalamud ? Theme.R(0) : h / 2f;
+        if (hovered)
+            dl.AddRectFilled(pos, pos + new Vector2(width, h), ImGui.GetColorU32(Theme.GlassHover), round);
+        dl.AddRect(pos, pos + new Vector2(width, h), ImGui.GetColorU32(Theme.Pink), round, ImDrawFlags.None, S(1.4f));
+        var ts = ImGui.CalcTextSize(label);
+        dl.AddText(pos + new Vector2((width - ts.X) / 2f, (h - ts.Y) / 2f), ImGui.GetColorU32(Theme.Text), label);
+        if (hovered)
+            ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+        return clicked;
+    }
+
+    // ---------------------------------------------------------------- crowd tab: ambient sounds
+
+    /// <summary>One card: on/off and status, the nearby count, and the mute conditions.</summary>
+    private void DrawAmbientCard()
+    {
+        Theme.Card("ambient", () =>
         {
             var left = Theme.CardInnerLeft;
             var right = Theme.CardInnerRight;
             var top = ImGui.GetCursorScreenPos().Y;
 
-            // Left: big "count / threshold"
-            ImGui.TextColored(Theme.Muted, "Nearby players");
-            var count = Plugin.LastCount;
-            using (plugin.TitleFont.Available ? plugin.TitleFont.Push() : null)
-            {
-                ImGui.TextColored(count >= Config.MuteAtPlayers ? Theme.AccentText : Theme.Text, count.ToString());
-                ImGui.SameLine(0, S(6));
-                ImGui.TextColored(Theme.AccentText, "/");
-                ImGui.SameLine(0, S(6));
-                ImGui.TextColored(Theme.Muted, Config.MuteAtPlayers.ToString());
-            }
-            var radiusText = Config.Radius > 0 ? $"Players within {Config.Radius:0} yalms." : "All players around you.";
-            Theme.Wrapped(radiusText, Theme.Muted);
-            var bottom = ImGui.GetItemRectMax().Y;
-
-            // Right: status badge, vertically centred on the left block
+            // Title, with the crowd on/off button and the status badge on the right.
+            CardTitle("Crowd");
+            var titleH = ImGui.GetItemRectSize().Y;
             var (label, on) = StatusText();
             var icon = !Config.Enabled ? FontAwesomeIcon.PowerOff : on ? FontAwesomeIcon.VolumeMute : FontAwesomeIcon.VolumeUp;
-            var h = ImGui.GetFrameHeight() + S(8);
+            var h = ImGui.GetFrameHeight() + S(4);
             var gap = S(8);
-            var w = h + gap + Theme.StatusBadgeWidth(icon, label);
+            var bw = h + gap + Theme.StatusBadgeWidth(icon, label);
             var after = ImGui.GetCursorScreenPos();
-            if (right - left > w + S(150))
+            ImGui.SetCursorScreenPos(new Vector2(right - bw, top + Math.Min(0, (titleH - h) / 2f)));
+            DrawPowerButton(h);
+            ImGui.SameLine(0, gap);
+            Theme.StatusBadge(icon, label, on, h);
+            ImGui.SetCursorScreenPos(new Vector2(left, Math.Max(after.Y, top + h + S(2))));
+
+            // "1 / 10" and a short line next to it.
+            var count = Plugin.LastCount;
+            var rowTop = ImGui.GetCursorScreenPos().Y;
+            using (plugin.TitleFont.Available ? plugin.TitleFont.Push() : null)
             {
-                ImGui.SetCursorScreenPos(new Vector2(right - w, top + (bottom - top - h) / 2f));
-                DrawPowerButton(h);
-                ImGui.SameLine(0, gap);
-                Theme.StatusBadge(icon, label, on, h);
-                ImGui.SetCursorScreenPos(after);
-                ImGui.Dummy(Vector2.Zero);
+                ImGui.SetWindowFontScale(0.75f);
+                ImGui.TextColored(count >= Config.MuteAtPlayers ? Theme.AccentText : Theme.Text, count.ToString());
+                ImGui.SameLine(0, S(5));
+                ImGui.TextColored(Theme.AccentText, "/");
+                ImGui.SameLine(0, S(5));
+                ImGui.TextColored(Theme.Muted, Config.MuteAtPlayers.ToString());
+                ImGui.SetWindowFontScale(1f);
             }
-            else
+            var numBottom = ImGui.GetItemRectMax().Y;
+            ImGui.SameLine(0, S(10));
+            var where = Config.Radius > 0 ? $"within {Config.Radius:0} yalms" : "around you";
+            var line = $"nearby players {where} · ambient sounds mute at {Config.MuteAtPlayers}";
+            ImGui.SetCursorScreenPos(new Vector2(ImGui.GetCursorScreenPos().X, rowTop + Math.Max(0, (numBottom - rowTop - ImGui.GetTextLineHeight()) / 2f)));
+            ImGui.BeginGroup();
+            using (ImRaii.TextWrapPos(ImGui.GetCursorPosX() + (right - ImGui.GetCursorScreenPos().X)))
+                ImGui.TextColored(Theme.Muted, line);
+            ImGui.EndGroup();
+            ImGui.SetCursorScreenPos(new Vector2(left, Math.Max(numBottom, ImGui.GetItemRectMax().Y) + S(4)));
+
+            // The four settings, half width, two by two.
+            var colGap = S(14);
+            var half = (Theme.CardInnerWidth - colGap) / 2f;
+            var rowStart = ImGui.GetCursorScreenPos();
+
+            ImGui.BeginGroup();
+            var mute = Config.MuteAtPlayers;
+            if (IntSlider("Mute when at least", "##mute", ref mute, 1, 100, "%d players", half,
+                    "Mute the ambient sounds once this many players are around you."))
+                Config.MuteAtPlayers = mute;
+            var radius = Config.Radius;
+            if (FloatSlider("Radius", "##radius", ref radius, 5, 100, 1f, "%.0f yalms", half,
+                    "Only count players within this distance."))
+                Config.Radius = radius;
+            ImGui.EndGroup();
+            var leftBottom = ImGui.GetItemRectMax().Y;
+
+            ImGui.SetCursorScreenPos(new Vector2(left + half + colGap, rowStart.Y));
+            ImGui.BeginGroup();
+            var margin = Config.UnmuteMargin;
+            if (IntSlider("Unmute margin", "##margin", ref margin, 0, 50, "%d players", half,
+                    $"Unmute again once the crowd drops below {Math.Max(1, Config.MuteAtPlayers - margin)} players. Prevents flickering on and off."))
+                Config.UnmuteMargin = margin;
+            var delay = Config.UnmuteDelaySeconds;
+            if (FloatSlider("Unmute delay", "##delay", ref delay, 0, 30, 0.5f, "%.1f seconds", half,
+                    "How long it has to stay quiet before your volume comes back."))
+                Config.UnmuteDelaySeconds = delay;
+            ImGui.EndGroup();
+
+            ImGui.SetCursorScreenPos(new Vector2(left, Math.Max(leftBottom, ImGui.GetItemRectMax().Y)));
+            ImGui.Dummy(Vector2.Zero);
+        });
+    }
+
+    // ---------------------------------------------------------------- crowd tab: races and genders
+
+    private static readonly (byte Id, string Name)[] Races =
+    {
+        (0, "Any race"), (1, "Hyur"), (2, "Elezen"), (3, "Lalafell"), (4, "Miqo'te"),
+        (5, "Roegadyn"), (6, "Au Ra"), (7, "Hrothgar"), (8, "Viera"),
+    };
+
+    private static string GenderName(int g) => g switch { 0 => "Male", 1 => "Female", _ => "Any gender" };
+
+    private void DrawRacesCard()
+    {
+        Theme.Card("races", () =>
+        {
+            var right = Theme.CardInnerRight;
+            ImGui.TextColored(Theme.Text, "Races and genders");
+            var top = ImGui.GetItemRectMin().Y;
+            var after = ImGui.GetCursorScreenPos();
+            var sw = ImGui.GetFrameHeight() * 0.8f * 1.9f;
+            ImGui.SetCursorScreenPos(new Vector2(right - sw, top));
+            if (Switch("##raceson", Config.RaceRulesEnabled))
             {
-                // Narrow window: under the count.
-                DrawPowerButton(h);
-                ImGui.SameLine(0, gap);
-                Theme.StatusBadge(icon, label, on, h);
+                Config.RaceRulesEnabled = !Config.RaceRulesEnabled;
+                plugin.Save();
+                plugin.Individual.Refresh();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip(Config.RaceRulesEnabled ? "On. Click to turn all race and gender rules off." : "Off. Click to turn the rules on.");
+            ImGui.SetCursorScreenPos(after);
+            Theme.BrandText("Mute the sounds of everyone of a race or gender. People on your WhiteList are never muted, and neither are you.", Theme.Muted, right);
+
+            RaceRule? remove = null;
+            for (var i = 0; i < Config.RaceRules.Count; i++)
+            {
+                var r = Config.RaceRules[i];
+                using var id = ImRaii.PushId(i);
+                Divider();
+                ImGui.AlignTextToFramePadding();
+                if (Switch("##on", r.Enabled))
+                {
+                    r.Enabled = !r.Enabled;
+                    plugin.Save();
+                    plugin.Individual.Refresh();
+                }
+                ImGui.SameLine(0, S(8));
+                ImGui.SetNextItemWidth(S(110));
+                using (var combo = ImRaii.Combo("##race", Races.FirstOrDefault(x => x.Id == r.Race).Name ?? "Any race"))
+                {
+                    if (combo.Success)
+                        foreach (var (rid, rname) in Races)
+                            if (ImGui.Selectable(rname, r.Race == rid)) { r.Race = rid; plugin.Save(); plugin.Individual.Refresh(); }
+                }
+                ImGui.SameLine();
+                ImGui.SetNextItemWidth(S(110));
+                using (var combo = ImRaii.Combo("##gender", GenderName(r.Gender)))
+                {
+                    if (combo.Success)
+                        foreach (var g in new[] { -1, 0, 1 })
+                            if (ImGui.Selectable(GenderName(g), r.Gender == g)) { r.Gender = g; plugin.Save(); plugin.Individual.Refresh(); }
+                }
+                ImGui.SameLine();
+                ImGui.SetCursorScreenPos(new Vector2(Math.Max(ImGui.GetCursorScreenPos().X, right - ImGui.CalcTextSize("Remove").X), ImGui.GetCursorScreenPos().Y));
+                if (TextButton("Remove"))
+                    remove = r;
+
+                SoundChoices(r.MuteVoices, v => { r.MuteVoices = v; plugin.Individual.Refresh(); }, r.MuteFootsteps, v => r.MuteFootsteps = v, r.MuteSkills, v => r.MuteSkills = v);
+            }
+            if (remove != null)
+            {
+                Config.RaceRules.Remove(remove);
+                plugin.Save();
+                plugin.Individual.Refresh();
+            }
+
+            ImGuiHelpers.ScaledDummy(2f);
+            if (TextButton("+ Add a rule"))
+            {
+                Config.RaceRules.Add(new RaceRule());
+                Config.RaceRulesEnabled = true;
+                plugin.Save();
+                plugin.Individual.Refresh();
+            }
+
+            ImGuiHelpers.ScaledDummy(2f);
+            var party = Config.RaceSkipParty;
+            if (ImGui.Checkbox("Don't apply to my party members", ref party))
+            {
+                Config.RaceSkipParty = party;
+                plugin.Save();
+                plugin.Individual.Refresh();
+            }
+            var friends = Config.RaceSkipFriends;
+            if (ImGui.Checkbox("Don't apply to friends and Free Company members", ref friends))
+            {
+                Config.RaceSkipFriends = friends;
+                plugin.Save();
+                plugin.Individual.Refresh();
             }
         });
+    }
+
+    /// <summary>The three sound checkboxes; footsteps and skills are greyed out until they work.</summary>
+    private void SoundChoices(bool voices, Action<bool> setVoices, bool footsteps, Action<bool> setFootsteps, bool skills, Action<bool> setSkills)
+    {
+        ImGui.SetCursorPosX(ImGui.GetCursorPosX() + ImGui.GetFrameHeight() * 1.6f);
+        var v = voices;
+        if (ImGui.Checkbox("Emotes and voices", ref v))
+        {
+            setVoices(v);
+            plugin.Save();
+        }
+        ImGui.SameLine();
+        using (ImRaii.Disabled())
+        {
+            var f = footsteps;
+            ImGui.Checkbox("Footsteps", ref f);
+            ImGui.SameLine();
+            var k = skills;
+            ImGui.Checkbox("Skills and actions", ref k);
+        }
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            ImGui.SetTooltip("Coming in a later update.");
+    }
+
+    private static void Divider()
+    {
+        ImGuiHelpers.ScaledDummy(1f);
+        var y = ImGui.GetCursorScreenPos().Y;
+        ImGui.GetWindowDrawList().AddLine(new Vector2(Theme.CardInnerLeft, y), new Vector2(Theme.CardInnerRight, y), ImGui.GetColorU32(Theme.Border with { W = Theme.Border.W * 0.5f }));
+        ImGuiHelpers.ScaledDummy(2f);
+    }
+
+    /// <summary>Pink text that works like a link.</summary>
+    private static bool TextButton(string text)
+    {
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextColored(Theme.AccentText, text);
+        var hovered = ImGui.IsItemHovered();
+        if (hovered)
+            ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+        return hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left);
     }
 
     /// <summary>Round power button next to the status badge: turns Will-o-Muter off, or (filled pink) back on.</summary>
@@ -341,46 +637,12 @@ public sealed class MainWindow : Window
             ? Theme.IconCircle("##power", FontAwesomeIcon.PowerOff, Theme.Text, diameter)
             : Theme.IconCircle("##power", FontAwesomeIcon.PowerOff, Theme.OnPink, diameter, filled: true);
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(enabled ? "Disable Will-o-Muter" : "Enable Will-o-Muter");
+            ImGui.SetTooltip(enabled ? "Turn crowd muting off (the ambient sounds stay as they are)" : "Turn crowd muting back on");
         if (clicked)
         {
             Config.Enabled = !enabled;
             plugin.Save();
         }
-    }
-
-    // ---------------------------------------------------------------- settings card
-
-    private void DrawSettingsCard()
-    {
-        Theme.Card("settings", () =>
-        {
-            ImGui.TextColored(Theme.Text, "Mute conditions");
-            Theme.BrandText("Configure when Will-o-Muter should mute and unmute.", Theme.Muted, Theme.CardInnerRight);
-            ImGuiHelpers.ScaledDummy(4f);
-
-            var w = Theme.CardInnerWidth;
-
-            var mute = Config.MuteAtPlayers;
-            if (IntSlider("Mute when at least", "##mute", ref mute, 1, 100, "%d players", w,
-                    "Mute the ambient sounds once this many players are around you."))
-                Config.MuteAtPlayers = mute;
-
-            var margin = Config.UnmuteMargin;
-            if (IntSlider("Unmute margin", "##margin", ref margin, 0, 50, "%d players", w,
-                    $"Unmute again once the crowd drops below {Math.Max(1, Config.MuteAtPlayers - margin)} players. Prevents flickering on and off."))
-                Config.UnmuteMargin = margin;
-
-            var radius = Config.Radius;
-            if (FloatSlider("Radius", "##radius", ref radius, 5, 100, 1f, "%.0f yalms", w,
-                    "Only count players within this distance."))
-                Config.Radius = radius;
-
-            var delay = Config.UnmuteDelaySeconds;
-            if (FloatSlider("Unmute delay", "##delay", ref delay, 0, 30, 0.5f, "%.1f seconds", w,
-                    "How long it has to stay quiet before your volume comes back."))
-                Config.UnmuteDelaySeconds = delay;
-        });
     }
 
     private bool IntSlider(string label, string id, ref int value, int min, int max, string format, float width, string tip)
@@ -665,6 +927,452 @@ public sealed class MainWindow : Window
         if (hovered)
             ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
         return clicked;
+    }
+
+    // ---------------------------------------------------------------- people tab
+
+    private string addName = string.Empty;
+    private int addWorld = -1;
+    private string worldFilter = string.Empty;
+    private string listSearch = string.Empty;
+
+    private void DrawPeopleCard()
+    {
+        var ind = plugin.Individual;
+        Theme.Card("people", () =>
+        {
+            var right = Theme.CardInnerRight;
+            var w = Theme.CardInnerWidth;
+
+            // MuteList / WhiteList switch
+            if (Segment($"MuteList ({Config.MutedPeople.Count})", !showWhiteList)) showWhiteList = false;
+            ImGui.SameLine(0, 0);
+            if (Segment($"WhiteList ({Config.WhiteList.Count})", showWhiteList)) showWhiteList = true;
+            if (!showWhiteList)
+            {
+                ImGui.SameLine();
+                var sw = ImGui.GetFrameHeight() * 0.8f * 1.9f;
+                var onText = Config.IndividualEnabled ? "On" : "Off";
+                ImGui.SetCursorScreenPos(new Vector2(right - sw - S(6) - ImGui.CalcTextSize(onText).X, ImGui.GetCursorScreenPos().Y));
+                if (Switch("##liston", Config.IndividualEnabled))
+                {
+                    Config.IndividualEnabled = !Config.IndividualEnabled;
+                    plugin.Save();
+                    ind.Refresh();
+                }
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip(Config.IndividualEnabled ? "The MuteList is on. Click to stop muting everyone on it." : "The MuteList is off. Click to turn it on.");
+                ImGui.SameLine(0, S(6));
+                ImGui.AlignTextToFramePadding();
+                ImGui.TextColored(Theme.TextSoft, onText);
+            }
+
+            Theme.Wrapped(showWhiteList
+                ? "People who are never muted by the race and gender rules (your MuteList still applies to them)."
+                : "People whose sounds you never want to hear.", Theme.Muted);
+
+            // ---- add someone
+            Label("Add someone");
+            var target = Plugin.Targets.Target as Dalamud.Game.ClientState.Objects.SubKinds.IPlayerCharacter;
+            using (ImRaii.Disabled(target == null))
+            {
+                if (Theme.Button("Add my target"))
+                    AddPerson(target!.Name.TextValue, target.HomeWorld.RowId, target.HomeWorld.ValueNullable?.Name.ExtractText() ?? string.Empty);
+            }
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                ImGui.SetTooltip(target == null ? "Target a player first." : target.Name.TextValue);
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(Math.Min(S(140), w * 0.32f));
+            ImGui.InputTextWithHint("##addname", "First Last", ref addName, 32);
+            ImGui.SameLine();
+            var list = Individual.Worlds();
+            ImGui.SetNextItemWidth(Math.Min(S(110), w * 0.25f));
+            using (var combo = ImRaii.Combo("##addworld", addWorld >= 0 && addWorld < list.Count ? list[addWorld].Name : "Server", ImGuiComboFlags.HeightLarge))
+            {
+                if (combo.Success)
+                {
+                    ImGui.SetNextItemWidth(-1);
+                    ImGui.InputTextWithHint("##worldfilter", "Search...", ref worldFilter, 30);
+                    for (var i = 0; i < list.Count; i++)
+                    {
+                        if (worldFilter.Length > 0 && !list[i].Name.Contains(worldFilter, StringComparison.OrdinalIgnoreCase))
+                            continue;
+                        if (ImGui.Selectable(list[i].Name, i == addWorld))
+                            addWorld = i;
+                    }
+                }
+            }
+            ImGui.SameLine();
+            using (ImRaii.Disabled(addName.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).Length != 2 || addWorld < 0))
+            {
+                if (Theme.Button("Add"))
+                {
+                    AddPerson(addName.Trim(), list[addWorld].Id, list[addWorld].Name);
+                    addName = string.Empty;
+                }
+            }
+            Theme.Wrapped($"Or right-click a name in chat or a player: \"Add to {(showWhiteList ? "WhiteList" : "MuteList")} (Will-o-Muter)\".", Theme.Muted);
+
+            // ---- the list
+            var count = showWhiteList ? Config.WhiteList.Count : Config.MutedPeople.Count;
+            Label(showWhiteList ? "On the WhiteList" : "On the MuteList");
+            if (count > 6)
+            {
+                ImGui.SetNextItemWidth(w);
+                ImGui.InputTextWithHint("##search", "Search the list...", ref listSearch, 40);
+            }
+            if (count == 0)
+                Theme.Wrapped("Nobody yet.", Theme.Muted);
+
+            bool Matches(string display) => listSearch.Length == 0 || display.Contains(listSearch, StringComparison.OrdinalIgnoreCase);
+
+            if (showWhiteList)
+            {
+                ListedPerson? removeWhite = null;
+                foreach (var p in Config.WhiteList.Where(p => Matches(p.Display)))
+                {
+                    using var id = ImRaii.PushId($"{p.Name}@{p.WorldId}");
+                    Divider();
+                    PersonName(p.WorldName, p.Name, true);
+                    ImGui.SameLine();
+                    ImGui.SetCursorScreenPos(new Vector2(Math.Max(ImGui.GetCursorScreenPos().X, right - ImGui.CalcTextSize("Remove").X), ImGui.GetCursorScreenPos().Y));
+                    if (TextButton("Remove"))
+                        removeWhite = p;
+                }
+                if (removeWhite != null)
+                    ind.RemoveWhite(removeWhite);
+                return;
+            }
+
+            MutedPerson? remove = null;
+            foreach (var p in Config.MutedPeople.Where(p => Matches(p.Display)))
+            {
+                using var id = ImRaii.PushId(p.Key);
+                Divider();
+                ImGui.AlignTextToFramePadding();
+                if (Switch("##on", p.Enabled))
+                {
+                    p.Enabled = !p.Enabled;
+                    plugin.Save();
+                    ind.Refresh();
+                }
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip(p.Enabled ? "On. Click to pause muting this person." : "Paused. Click to mute this person again.");
+                ImGui.SameLine(0, S(8));
+                PersonName(p.WorldName, p.Name, p.Enabled);
+                ImGui.SameLine();
+                ImGui.SetCursorScreenPos(new Vector2(Math.Max(ImGui.GetCursorScreenPos().X, right - ImGui.CalcTextSize("Remove").X), ImGui.GetCursorScreenPos().Y));
+                if (TextButton("Remove"))
+                    remove = p;
+
+                SoundChoices(p.MuteVoices, v => { p.MuteVoices = v; ind.Refresh(); }, p.MuteFootsteps, v => p.MuteFootsteps = v, p.MuteSkills, v => p.MuteSkills = v);
+                ImGui.SetCursorPosX(ImGui.GetCursorPosX() + ImGui.GetFrameHeight() * 1.6f);
+                var hide = p.HideEmoteMessages;
+                if (ImGui.Checkbox("Hide their emote messages in chat", ref hide))
+                {
+                    p.HideEmoteMessages = hide;
+                    plugin.Save();
+                }
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Hides lines like \"Kai waves to you.\" in chat.");
+            }
+            if (remove != null)
+                ind.Remove(remove);
+        });
+    }
+
+    private void AddPerson(string name, uint worldId, string worldName)
+    {
+        if (showWhiteList) plugin.Individual.AddWhite(name, worldId, worldName);
+        else plugin.Individual.Add(name, worldId, worldName);
+    }
+
+    /// <summary>"[Lich] Mocha Parfait", the server in grey.</summary>
+    private static void PersonName(string world, string name, bool active)
+    {
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextColored(Theme.Muted, $"[{world}]");
+        ImGui.SameLine(0, S(5));
+        ImGui.TextColored(active ? Theme.Text : Theme.Muted, name);
+    }
+
+    /// <summary>One half of the MuteList / WhiteList switch.</summary>
+    private static bool Segment(string label, bool on)
+    {
+        var h = ImGui.GetFrameHeight();
+        var w = ImGui.CalcTextSize(label).X + S(22);
+        var pos = ImGui.GetCursorScreenPos();
+        var clicked = ImGui.InvisibleButton("##seg" + label, new Vector2(w, h));
+        var hovered = ImGui.IsItemHovered();
+        var dl = ImGui.GetWindowDrawList();
+        dl.AddRectFilled(pos, pos + new Vector2(w, h), ImGui.GetColorU32(on ? Theme.Pink : hovered ? Theme.GlassHover : Theme.Field), Theme.R(10));
+        dl.AddRect(pos, pos + new Vector2(w, h), ImGui.GetColorU32(on ? Theme.Outline : Theme.Border), Theme.R(10));
+        var ts = ImGui.CalcTextSize(label);
+        dl.AddText(pos + new Vector2((w - ts.X) / 2f, (h - ts.Y) / 2f), ImGui.GetColorU32(on ? Theme.OnPink : Theme.Text), label);
+        if (hovered && !on)
+            ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+        return clicked && !on;
+    }
+
+    // ---------------------------------------------------------------- emotes tab
+
+    private sealed record EmoteInfo(uint Id, string Name, string Command, uint Icon, uint Category);
+    private static List<EmoteInfo>? emotes;
+    private string emoteSearch = string.Empty;
+    private bool emotesOnlyMuted;
+
+    private static List<EmoteInfo> Emotes()
+        => emotes ??= Plugin.Data.GetExcelSheet<Lumina.Excel.Sheets.Emote>()
+            .Where(e => e.TextCommand.RowId != 0 && !string.IsNullOrWhiteSpace(e.Name.ExtractText()))
+            .Select(e => new EmoteInfo(e.RowId, e.Name.ExtractText(), e.TextCommand.ValueNullable?.Command.ExtractText() ?? string.Empty, e.Icon, e.EmoteCategory.RowId))
+            .GroupBy(e => e.Name).Select(g => g.First())
+            .OrderBy(e => e.Name)
+            .ToList();
+
+    private void DrawEmotesCard()
+    {
+        Theme.Card("emotes", () =>
+        {
+            var right = Theme.CardInnerRight;
+            var w = Theme.CardInnerWidth;
+            CardTitle("Emotes");
+            var top = ImGui.GetItemRectMin().Y;
+            var after = ImGui.GetCursorScreenPos();
+            var sw = ImGui.GetFrameHeight() * 0.8f * 1.9f;
+            ImGui.SetCursorScreenPos(new Vector2(right - sw, top));
+            if (Switch("##emoteson", Config.EmotesEnabled))
+            {
+                Config.EmotesEnabled = !Config.EmotesEnabled;
+                plugin.Save();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip(Config.EmotesEnabled ? "On. Click to stop muting these emotes." : "Off. Click to mute the emotes you picked.");
+            ImGui.SetCursorScreenPos(after);
+            Theme.BrandText("Pick emotes to mute.", Theme.Muted, right);
+
+            var self = Config.EmotesMuteSelf;
+            if (ImGui.Checkbox("Also when I use them", ref self))
+            {
+                Config.EmotesMuteSelf = self;
+                plugin.Save();
+            }
+
+            ImGuiHelpers.ScaledDummy(2f);
+            ImGui.SetNextItemWidth(w - S(150));
+            ImGui.InputTextWithHint("##emotesearch", "Search emotes (name or /command)...", ref emoteSearch, 40);
+            ImGui.SameLine();
+            ImGui.Checkbox($"Muted only ({Config.MutedEmotes.Count})", ref emotesOnlyMuted);
+
+            var list = Emotes().Where(e =>
+                (!emotesOnlyMuted || Config.MutedEmotes.Contains(e.Id))
+                && (emoteSearch.Length == 0 || e.Name.Contains(emoteSearch, StringComparison.OrdinalIgnoreCase)
+                    || e.Command.Contains(emoteSearch, StringComparison.OrdinalIgnoreCase))).ToList();
+
+            var h = Math.Min(S(320), list.Count * (ImGui.GetFrameHeight() + ImGui.GetStyle().ItemSpacing.Y) + S(8));
+            using (var child = ImRaii.Child("##emotelist", new Vector2(w, Math.Max(h, ImGui.GetFrameHeight() * 2)), false))
+            {
+                if (child.Success)
+                {
+                    if (list.Count == 0)
+                        Theme.Wrapped(emotesOnlyMuted ? "No emotes muted yet." : "No emote matches your search.", Theme.Muted);
+                    var iconSize = ImGui.GetFrameHeight();
+                    foreach (var e in list)
+                    {
+                        using var id = ImRaii.PushId((int)e.Id);
+                        var on = Config.MutedEmotes.Contains(e.Id);
+                        if (ImGui.Checkbox("##m", ref on))
+                        {
+                            if (on) Config.MutedEmotes.Add(e.Id);
+                            else Config.MutedEmotes.Remove(e.Id);
+                            plugin.Save();
+                        }
+                        ImGui.SameLine();
+                        if (e.Icon != 0)
+                        {
+                            var tex = Plugin.Textures.GetFromGameIcon(new Dalamud.Interface.Textures.GameIconLookup(e.Icon)).GetWrapOrEmpty();
+                            ImGui.Image(tex.Handle, new Vector2(iconSize));
+                            ImGui.SameLine();
+                        }
+                        ImGui.AlignTextToFramePadding();
+                        ImGui.TextColored(on ? Theme.Text : Theme.TextSoft, e.Name);
+                        if (e.Command.Length > 0)
+                        {
+                            ImGui.SameLine();
+                            ImGui.TextColored(Theme.Muted, e.Command);
+                        }
+                    }
+                }
+            }
+
+            if (Config.MutedEmotes.Count > 0)
+            {
+                ImGuiHelpers.ScaledDummy(2f);
+                if (TextButton("Unmute all"))
+                    ImGui.OpenPopup("##unmuteall");
+                using var popup = ImRaii.Popup("##unmuteall");
+                if (popup.Success)
+                {
+                    ImGui.TextColored(Theme.Text, $"Unmute all {Config.MutedEmotes.Count} emotes?");
+                    if (Theme.Button("Unmute all"))
+                    {
+                        Config.MutedEmotes.Clear();
+                        plugin.Save();
+                        ImGui.CloseCurrentPopup();
+                    }
+                    ImGui.SameLine();
+                    if (ImGui.Button("Cancel"))
+                        ImGui.CloseCurrentPopup();
+                }
+            }
+            Theme.Wrapped("For now this mutes the emote's voice. Emote sound effects that aren't voices follow with the skills step.", Theme.Muted);
+        });
+    }
+
+    // ---------------------------------------------------------------- settings tab: import / export
+
+    private readonly Dalamud.Interface.ImGuiFileDialog.FileDialogManager fileDialog = new();
+    private bool transferWhite;
+    private string importText = string.Empty;
+    private string? transferMessage;
+    private bool transferError;
+
+    private void DrawImportExportCard()
+    {
+        var ind = plugin.Individual;
+        Theme.Card("transfer", () =>
+        {
+            var w = Theme.CardInnerWidth;
+            ImGui.TextColored(Theme.Text, "Import / Export");
+            Theme.Wrapped("Share your lists or keep a copy. One person per line: [Server] First Last", Theme.Muted);
+            ImGuiHelpers.ScaledDummy(2f);
+            if (ImGui.RadioButton($"MuteList ({Config.MutedPeople.Count})", !transferWhite)) transferWhite = false;
+            ImGui.SameLine();
+            if (ImGui.RadioButton($"WhiteList ({Config.WhiteList.Count})", transferWhite)) transferWhite = true;
+            var listName = transferWhite ? "WhiteList" : "MuteList";
+
+            // ---- export
+            Label("Export");
+            var export = transferWhite
+                ? Individual.Export(Config.WhiteList.Select(p => (p.Name, p.WorldName)))
+                : Individual.Export(Config.MutedPeople.Select(p => (p.Name, p.WorldName)));
+            var lines = Math.Clamp(export.Split('\n').Length, 2, 8);
+            var ro = export;
+            ImGui.InputTextMultiline("##export", ref ro, 100000, new Vector2(w, ImGui.GetTextLineHeightWithSpacing() * lines + S(8)), ImGuiInputTextFlags.ReadOnly);
+            using (ImRaii.Disabled(export.Length == 0))
+            {
+                if (Theme.Button("Copy"))
+                {
+                    ImGui.SetClipboardText(export);
+                    SetTransfer($"Copied your {listName}.", false);
+                }
+                ImGui.SameLine();
+                if (Theme.Button("Save as file..."))
+                {
+                    var text = export;
+                    fileDialog.SaveFileDialog("Save your " + listName, ".txt", $"Will-o-Muter {listName}.txt", ".txt", (ok, path) =>
+                    {
+                        if (!ok) return;
+                        try
+                        {
+                            System.IO.File.WriteAllText(path, text);
+                            SetTransfer($"Saved as {System.IO.Path.GetFileName(path)}.", false);
+                        }
+                        catch (Exception e)
+                        {
+                            SetTransfer($"Couldn't save the file: {e.Message}", true);
+                        }
+                    });
+                }
+            }
+
+            // ---- import
+            Label("Import");
+            ImGui.InputTextMultiline("##import", ref importText, 100000, new Vector2(w, ImGui.GetTextLineHeightWithSpacing() * 5 + S(8)));
+            var (people, skipped) = Individual.Parse(importText);
+            var already = people.Count(p => transferWhite ? ind.FindWhite(p.Name, p.WorldId) != null : ind.Find(p.Name, p.WorldId) != null);
+            var fresh = people.Count - already;
+            if (importText.Trim().Length > 0)
+            {
+                ImGui.TextColored(Theme.Green, $"{fresh} new");
+                if (already > 0) { ImGui.SameLine(); ImGui.TextColored(Theme.Muted, $"· {already} already on the list"); }
+                if (skipped.Count > 0)
+                {
+                    ImGui.SameLine();
+                    ImGui.TextColored(Theme.Amber, $"· {skipped.Count} skipped");
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip(string.Join("\n", skipped.Take(15)) + (skipped.Count > 15 ? $"\n… and {skipped.Count - 15} more" : string.Empty));
+                }
+            }
+            using (ImRaii.Disabled(fresh == 0))
+            {
+                if (Theme.Button($"Add to {listName}"))
+                {
+                    var added = people.Count(p => transferWhite ? ind.AddWhite(p.Name, p.WorldId, p.WorldName) : ind.Add(p.Name, p.WorldId, p.WorldName));
+                    SetTransfer($"Added {added} to your {listName}.", false);
+                    importText = string.Empty;
+                }
+            }
+            ImGui.SameLine();
+            using (ImRaii.Disabled(people.Count == 0))
+            {
+                if (Theme.Button($"Replace {listName}"))
+                    ImGui.OpenPopup("##confirmreplace");
+            }
+            ImGui.SameLine();
+            if (Theme.Button("Open file..."))
+            {
+                fileDialog.OpenFileDialog("Open a list", ".txt", (ok, paths) =>
+                {
+                    if (!ok || paths.Count == 0) return;
+                    try
+                    {
+                        importText = System.IO.File.ReadAllText(paths[0]);
+                    }
+                    catch (Exception e)
+                    {
+                        SetTransfer($"Couldn't read the file: {e.Message}", true);
+                    }
+                }, 1);
+            }
+
+            using (var popup = ImRaii.Popup("##confirmreplace"))
+            {
+                if (popup.Success)
+                {
+                    ImGui.TextColored(Theme.Text, $"Replace your whole {listName} with these {people.Count} people?");
+                    if (Theme.Button("Replace"))
+                    {
+                        if (transferWhite)
+                        {
+                            Config.WhiteList.Clear();
+                            foreach (var p in people) ind.AddWhite(p.Name, p.WorldId, p.WorldName);
+                        }
+                        else
+                        {
+                            Config.MutedPeople.Clear();
+                            foreach (var p in people) ind.Add(p.Name, p.WorldId, p.WorldName);
+                        }
+                        plugin.Save();
+                        ind.Refresh();
+                        SetTransfer($"Your {listName} now has {people.Count} people.", false);
+                        importText = string.Empty;
+                        ImGui.CloseCurrentPopup();
+                    }
+                    ImGui.SameLine();
+                    if (ImGui.Button("Cancel"))
+                        ImGui.CloseCurrentPopup();
+                }
+            }
+
+            if (transferMessage != null)
+                Theme.Wrapped(transferMessage, transferError ? Theme.Amber : Theme.AccentText);
+        });
+    }
+
+    private void SetTransfer(string message, bool error)
+    {
+        transferMessage = message;
+        transferError = error;
     }
 
     // ---------------------------------------------------------------- footer

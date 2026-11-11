@@ -20,7 +20,10 @@ namespace WillOMuter;
 
 public sealed class Plugin : IDalamudPlugin
 {
-    private const string Command = "/willomuter";
+    /// <summary>"WillOMuter", or "WillOMuterTest" for a test build that runs next to the normal one.</summary>
+    public static readonly string Id = typeof(Plugin).Assembly.GetName().Name ?? "WillOMuter";
+    public static bool IsTestBuild => Id != "WillOMuter";
+    private static readonly string Command = IsTestBuild ? "/willomutertest" : "/willomuter";
 
     [PluginService] internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
     [PluginService] private static ICommandManager CommandManager { get; set; } = null!;
@@ -29,19 +32,25 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] private static IGameConfig GameConfig { get; set; } = null!;
     [PluginService] private static IPluginLog Log { get; set; } = null!;
     [PluginService] private static IDtrBar DtrBar { get; set; } = null!;
-    [PluginService] private static IDataManager Data { get; set; } = null!;
+    [PluginService] internal static IDataManager Data { get; private set; } = null!;
+    [PluginService] internal static IObjectTable Objects { get; private set; } = null!;
+    [PluginService] private static IChatGui Chat { get; set; } = null!;
+    [PluginService] private static IContextMenu ContextMenu { get; set; } = null!;
+    [PluginService] internal static ITargetManager Targets { get; private set; } = null!;
+    [PluginService] private static IGameInteropProvider Interop { get; set; } = null!;
+    [PluginService] internal static ITextureProvider Textures { get; private set; } = null!;
+
+    /// <summary>Muting the sounds of specific people.</summary>
+    public Individual Individual { get; }
 
     private IDtrBarEntry? dtr;
     private string lastDtrKey = string.Empty;
 
-    /// <summary>
-    /// The colours the server info bar entry can have: the game's default, then the game colours closest to
-    /// pink, purple, blue, green, gold and red (the bar can only use the game's own colour list).
-    /// </summary>
+    /// <summary>What an old colour choice (before version 3) becomes: the matching quick colour, or the game's default.</summary>
     private static uint? OldColor(int index) => index > 0 && index <= QuickColors.Length ? QuickColors[index - 1] : null;
 
     private readonly Configuration config;
-    private readonly WindowSystem windows = new("WillOMuter");
+    private readonly WindowSystem windows = new(Id);
     private readonly MainWindow configWindow;
 
     public Configuration Configuration => config;
@@ -95,7 +104,7 @@ public sealed class Plugin : IDalamudPlugin
         }
         try
         {
-            dtr = DtrBar.Get("Will-o-Muter");
+            dtr = DtrBar.Get(IsTestBuild ? "Will-o-Muter (Test)" : "Will-o-Muter");
             dtr.OnClick = OnDtrClick;
             UpdateDtr();
         }
@@ -104,6 +113,7 @@ public sealed class Plugin : IDalamudPlugin
             Log.Warning(ex, "Couldn't add Will-o-Muter to the server info bar.");
         }
 
+        Individual = new Individual(config, Save, ObjectTable, Chat, ContextMenu, Interop, Log);
         configWindow = new MainWindow(this);
         windows.AddWindow(configWindow);
 
@@ -121,13 +131,15 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnUpdate(IFramework framework)
     {
+        Individual.Update();
+
         // Check twice a second, not every frame.
         var now = DateTime.UtcNow;
         if ((now - lastCheck).TotalMilliseconds < 500) return;
         lastCheck = now;
         UpdateDtr();
 
-        if (!config.Enabled)
+        if (!config.Enabled || !config.AllEnabled)
         {
             if (config.IsMuted) Restore();
             return;
@@ -252,7 +264,7 @@ public sealed class Plugin : IDalamudPlugin
         var label = on ? (muted ? config.DtrMutingText : config.DtrIdleText).Trim() : string.Empty;
         var text = label;
         if (!config.Enabled)
-            text = text.Length > 0 ? $"{text} (off)" : "Will-o-Muter (off)";
+            text = text.Length > 0 ? $"{text} (off)" : "Crowd muting (off)";
         return (text, muted ? config.DtrMutingRgb : config.DtrIdleRgb);
     }
 
@@ -262,7 +274,7 @@ public sealed class Plugin : IDalamudPlugin
             return;
 
         var (text, rgb) = DtrLook(config.IsMuted);
-        var shown = config.DtrShown && (config.DtrAlways || config.IsMuted) && text.Length > 0;
+        var shown = config.AllEnabled && config.DtrShown && (config.DtrAlways || config.IsMuted) && text.Length > 0;
         var key = $"{shown}|{text}|{rgb}|{config.Enabled}|{config.IsMuted}|{config.DtrClickToggles}|{LastCount}|{config.MuteAtPlayers}|{config.UnmuteMargin}";
         if (key == lastDtrKey)
             return;
@@ -275,9 +287,9 @@ public sealed class Plugin : IDalamudPlugin
         dtr.Text = Colored(text, rgb);
 
         var unmuteBelow = Math.Max(1, config.MuteAtPlayers - config.UnmuteMargin);
-        var state = !config.Enabled ? "turned off" : config.IsMuted ? "ambient sounds muted" : "not muting";
+        var state = !config.Enabled ? "crowd muting is off" : config.IsMuted ? "ambient sounds muted" : "not muting";
         var click = config.DtrClickToggles
-            ? $"Click: turn Will-o-Muter {(config.Enabled ? "off" : "on")} · Right-click: settings"
+            ? $"Click: turn crowd muting {(config.Enabled ? "off" : "on")} · Right-click: settings"
             : "Click: settings";
         dtr.Tooltip = new SeStringBuilder()
             .AddText($"Will-o-Muter: {state}\n{LastCount} players nearby (mutes at {config.MuteAtPlayers}, unmutes below {unmuteBelow})\n{click}")
@@ -314,6 +326,7 @@ public sealed class Plugin : IDalamudPlugin
     public void Dispose()
     {
         Framework.Update -= OnUpdate;
+        Individual.Dispose();
         CommandManager.RemoveHandler(Command);
         dtr?.Remove();
 

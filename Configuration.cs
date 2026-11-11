@@ -1,5 +1,6 @@
 using Dalamud.Configuration;
 using System;
+using System.Collections.Generic;
 
 namespace WillOMuter;
 
@@ -8,7 +9,10 @@ public class Configuration : IPluginConfiguration
 {
     public int Version { get; set; } = 3;
 
-    /// <summary>Whether Will-o-Muter is enabled.</summary>
+    /// <summary>Everything in Will-o-Muter on or off (crowd, people, races, emotes and the server info bar).</summary>
+    public bool AllEnabled { get; set; } = true;
+
+    /// <summary>Whether crowd muting (the ambient sounds) is enabled.</summary>
     public bool Enabled { get; set; } = true;
 
     /// <summary>Mute when at least this many other players are within <see cref="Radius"/>.</summary>
@@ -61,6 +65,27 @@ public class Configuration : IPluginConfiguration
 
     /// <summary>Left-click turns Will-o-Muter on/off (otherwise it opens the settings). Right-click always opens them.</summary>
     public bool DtrClickToggles { get; set; } = true;
+
+    // ---- individual: specific people whose sounds are muted
+
+    public bool IndividualEnabled { get; set; } = true;
+    public List<MutedPerson> MutedPeople { get; set; } = new();
+
+    /// <summary>People never muted by the race and gender rules.</summary>
+    public List<ListedPerson> WhiteList { get; set; } = new();
+
+    // ---- emotes muted for everyone
+    public bool EmotesEnabled { get; set; } = true;
+    public HashSet<uint> MutedEmotes { get; set; } = new();
+
+    /// <summary>Also mute them when you use them yourself.</summary>
+    public bool EmotesMuteSelf { get; set; } = true;
+
+    // ---- race and gender rules
+    public bool RaceRulesEnabled { get; set; }
+    public List<RaceRule> RaceRules { get; set; } = new();
+    public bool RaceSkipParty { get; set; } = true;
+    public bool RaceSkipFriends { get; set; }
 
     // Persisted so a crash while muted doesn't leave your ambient volume at 0.
     public bool IsMuted { get; set; } = false;
