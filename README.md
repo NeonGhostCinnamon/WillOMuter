@@ -24,7 +24,7 @@ Will-o-Muter mutes the Ambient Sounds channel when a crowd gathers around you, a
 - **Mute when at least** a number of players are nearby, counting only players within a **radius** you choose.
 - **Unmute margin** and **unmute delay**, so it doesn't flicker on and off at the edge of a crowd.
 - Your own volume always comes back: when you turn it off, when the plugin unloads, even after a crash. Change the volume yourself while it's muted and it keeps yours.
-- **Server info bar**: "Muting crowd · 14" at the top right of your screen (also usable in Umbra). Choose your own text and colour, show it always or only while muting, and click it to turn Will-o-Muter on or off.
+- **Server info bar**: "Muting crowd" at the top right of your screen (also usable in Umbra). Choose your own text and colour, show it always or only while muting, and click it to turn Will-o-Muter on or off.
 - Dark, light or Dalamud theme.
 
 </details>

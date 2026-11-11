@@ -52,7 +52,7 @@ public class Configuration : IPluginConfiguration
     public uint? DtrIdleRgb { get; set; }
     public const uint DefaultMutingRgb = 0xFF7EB6;
 
-    /// <summary>Add " · 14" (players nearby).</summary>
+    /// <summary>No longer used: the bar only says whether Will-o-Muter is muting (kept so old settings still load).</summary>
     public bool DtrShowCount { get; set; } = true;
 
     /// <summary>Old colour choice (before version 3): index into the old colour list; 0 = the game's default colour.</summary>

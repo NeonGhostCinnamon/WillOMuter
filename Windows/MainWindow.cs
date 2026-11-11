@@ -460,14 +460,6 @@ public sealed class MainWindow : Window
                     Config.DtrIdleText, Configuration.DefaultIdleText, v => Config.DtrIdleText = v, w, "Colour when not muting");
             }
 
-            ImGuiHelpers.ScaledDummy(2f);
-            var count = Config.DtrShowCount;
-            if (ImGui.Checkbox($"Add the number of players ( · {Plugin.LastCount} )", ref count))
-            {
-                Config.DtrShowCount = count;
-                plugin.Save();
-            }
-
             // Preview: dark strips like the game's bar, one per state.
             Label("Preview");
             PreviewStrip(true, w);
@@ -528,7 +520,7 @@ public sealed class MainWindow : Window
             plugin.Save();
         }
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(on ? "Text on. Turn off to show only the number of players." : "Text off: only the number of players. Turn on to show the text.");
+            ImGui.SetTooltip(on ? "Text on. Turn off to show nothing in this state." : "Text off: nothing is shown in this state. Turn on to show the text.");
 
         ImGui.SameLine(0, S(6));
         using (ImRaii.Disabled(!on))
@@ -546,7 +538,7 @@ public sealed class MainWindow : Window
             var resetW = ImGui.CalcTextSize("Reset").X;
             ImGui.SetNextItemWidth(Math.Max(S(80), Math.Min(width - (ImGui.GetCursorScreenPos().X - Theme.CardInnerLeft) - resetW - S(12), S(220))));
             var v = value;
-            if (ImGui.InputTextWithHint("##text", fallback.Length > 0 ? fallback : "(blank: only the number)", ref v, 40))
+            if (ImGui.InputTextWithHint("##text", fallback.Length > 0 ? fallback : "(blank: nothing is shown)", ref v, 40))
             {
                 set(v);
                 plugin.Save();
@@ -565,7 +557,7 @@ public sealed class MainWindow : Window
             }
         }
         if (!on)
-            Theme.Wrapped("Off: only the number of players.", Theme.Muted);
+            Theme.Wrapped("Off: nothing is shown in this state.", Theme.Muted);
     }
 
     private Vector4 pickerColor;

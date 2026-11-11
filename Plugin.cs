@@ -251,8 +251,6 @@ public sealed class Plugin : IDalamudPlugin
         var on = muted ? config.DtrMutingTextOn : config.DtrIdleTextOn;
         var label = on ? (muted ? config.DtrMutingText : config.DtrIdleText).Trim() : string.Empty;
         var text = label;
-        if (config.DtrShowCount && config.Enabled)
-            text = text.Length > 0 ? $"{text} · {LastCount}" : LastCount.ToString();
         if (!config.Enabled)
             text = text.Length > 0 ? $"{text} (off)" : "Will-o-Muter (off)";
         return (text, muted ? config.DtrMutingRgb : config.DtrIdleRgb);
