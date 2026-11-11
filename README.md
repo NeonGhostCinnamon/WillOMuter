@@ -22,13 +22,12 @@ Will-o-Muter mutes the ambient sounds when a crowd gathers around you, and can s
 <br>
 
 - **Crowd**: mutes the Ambient Sounds channel when at least a number of players are within a **radius** you choose, with an **unmute margin** and **unmute delay** so it doesn't flicker. Your own volume always comes back: when you turn it off, when the plugin unloads, even after a crash.
-- **People**: a **MuteList** of people whose voices (emotes, battle shouts) you never want to hear, and a **WhiteList** of people who are never muted. Add someone by right-clicking them in chat or in the world, with "Mute target", or by name and server. You can also hide their emote messages in chat.
-- **Races and genders**: mute the voices of everyone of a race and/or gender, optionally leaving out your party, friends and Free Company.
+- **People**: a **MuteList** of people you never want to hear, and a **WhiteList** of people who are never muted. For each person you choose what to mute: their **emotes** (voices and sound effects like clapping), **footsteps** and **skills and actions**. Add someone by right-clicking them in chat, the party list, the target window, the social windows or the world, with "Mute target", or by name and server. You can also hide their emote messages in chat.
+- **Races and genders**: mute the emotes, footsteps and skills of everyone of a race and/or gender, optionally leaving out your party, friends and Free Company.
 - **Emotes**: pick emotes to mute for everyone (also when you use them, if you like).
 - **Quick access**: one button turns everything off, plus "Mute target" and shortcuts to your lists.
 - **Server info bar**: "Muting crowd" at the top right of your screen (also usable in Umbra), with your own text and colour.
 - **Import / Export**: share your MuteList or WhiteList as "[Server] First Last" lines, or keep a copy as a file.
-- Footsteps and skill sounds of muted people are planned for a later update.
 
 </details>
 
