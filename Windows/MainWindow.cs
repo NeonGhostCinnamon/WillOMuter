@@ -1232,8 +1232,15 @@ public sealed class MainWindow : Window
                     if (list.Count == 0)
                         Theme.Wrapped(emotesOnlyMuted ? "No emotes muted yet." : "No emote matches your search.", Theme.Muted);
                     var iconSize = ImGui.GetFrameHeight();
-                    foreach (var e in list)
+                    // Only the rows that can be seen are drawn (and only their icons loaded).
+                    var rowH = ImGui.GetFrameHeight() + ImGui.GetStyle().ItemSpacing.Y;
+                    var top0 = ImGui.GetCursorPosY();
+                    var first = Math.Max(0, (int)((ImGui.GetScrollY() - top0) / rowH));
+                    var last = Math.Min(list.Count, first + (int)(ImGui.GetWindowHeight() / rowH) + 2);
+                    for (var i = first; i < last; i++)
                     {
+                        var e = list[i];
+                        ImGui.SetCursorPosY(top0 + i * rowH);
                         using var id = ImRaii.PushId((int)e.Id);
                         var on = Config.MutedEmotes.Contains(e.Id);
                         if (ImGui.Checkbox("##m", ref on))
@@ -1256,6 +1263,11 @@ public sealed class MainWindow : Window
                             ImGui.SameLine();
                             ImGui.TextColored(Theme.Muted, e.Command);
                         }
+                    }
+                    if (list.Count > 0)
+                    {
+                        ImGui.SetCursorPosY(top0 + list.Count * rowH - ImGui.GetStyle().ItemSpacing.Y);
+                        ImGui.Dummy(new Vector2(1, 0));
                     }
                 }
             }
