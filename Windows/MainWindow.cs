@@ -312,6 +312,13 @@ public sealed class MainWindow : Window
 
     private bool selectPeopleTab;
     private bool showWhiteList;
+    private readonly HashSet<string> openPeople = new(); // MuteList people whose options are folded out
+
+    private void ToggleOpen(string key)
+    {
+        if (!openPeople.Remove(key))
+            openPeople.Add(key);
+    }
 
     /// <summary>Above the tabs: mute your target, jump to the MuteList or WhiteList, and whether it's muting now.</summary>
     private void DrawQuickAccess()
@@ -1058,7 +1065,19 @@ public sealed class MainWindow : Window
             {
                 using var id = ImRaii.PushId(p.Key);
                 Divider();
+                var open = openPeople.Contains(p.Key);
+
+                // One line: arrow, on/off, name, and whether they're muted right now.
                 ImGui.AlignTextToFramePadding();
+                var rowX = ImGui.GetCursorPosX();
+                using (Plugin.PluginInterface.UiBuilder.IconFontHandle.Push())
+                {
+                    if (TextButton((open ? FontAwesomeIcon.CaretDown : FontAwesomeIcon.CaretRight).ToIconString()))
+                        ToggleOpen(p.Key);
+                }
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip(open ? "Hide the options." : "Show the options (emotes, footsteps, skills…).");
+                ImGui.SameLine(rowX + S(16)); // same spot whichever way the arrow points
                 if (Switch("##on", p.Enabled))
                 {
                     p.Enabled = !p.Enabled;
@@ -1069,11 +1088,24 @@ public sealed class MainWindow : Window
                     ImGui.SetTooltip(p.Enabled ? "On. Click to pause muting this person." : "Paused. Click to mute this person again.");
                 ImGui.SameLine(0, S(8));
                 PersonName(p.WorldName, p.Name, p.Enabled);
-                ImGui.SameLine();
-                ImGui.SetCursorScreenPos(new Vector2(Math.Max(ImGui.GetCursorScreenPos().X, right - ImGui.CalcTextSize("Remove").X), ImGui.GetCursorScreenPos().Y));
-                if (TextButton("Remove"))
-                    remove = p;
+                if (ImGui.IsItemHovered())
+                    ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+                if (ImGui.IsItemClicked())
+                    ToggleOpen(p.Key);
 
+                var muted = Config.AllEnabled && Config.IndividualEnabled && p.Enabled
+                            && (p.MuteVoices || p.MuteFootsteps || p.MuteSkills);
+                var tag = muted ? "Muted" : "Not muted";
+                var tagWidth = ImGui.CalcTextSize(tag).X + S(14);
+                ImGui.SameLine();
+                ImGui.SetCursorScreenPos(new Vector2(Math.Max(ImGui.GetCursorScreenPos().X, right - tagWidth),
+                    ImGui.GetCursorScreenPos().Y + (ImGui.GetFrameHeight() - ImGui.GetTextLineHeight() - S(2)) / 2f));
+                Theme.Pill(tag, muted ? Theme.Pink : new Vector4(0.55f, 0.55f, 0.62f, 1f));
+
+                if (!open)
+                    continue;
+
+                // The fold-out part with this person's options.
                 SoundChoices(p.MuteVoices, v => { p.MuteVoices = v; ind.Refresh(); }, p.MuteFootsteps, v => p.MuteFootsteps = v, p.MuteSkills, v => p.MuteSkills = v);
                 ImGui.SetCursorPosX(ImGui.GetCursorPosX() + ImGui.GetFrameHeight() * 1.6f);
                 var hide = p.HideEmoteMessages;
@@ -1084,6 +1116,10 @@ public sealed class MainWindow : Window
                 }
                 if (ImGui.IsItemHovered())
                     ImGui.SetTooltip("Hides lines like \"Kai waves to you.\" in chat.");
+                var removeText = "Remove from MuteList";
+                ImGui.SetCursorScreenPos(new Vector2(right - ImGui.CalcTextSize(removeText).X, ImGui.GetCursorScreenPos().Y));
+                if (TextButton(removeText))
+                    remove = p;
             }
             if (remove != null)
                 ind.Remove(remove);
