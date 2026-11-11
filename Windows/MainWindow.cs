@@ -592,22 +592,31 @@ public sealed class MainWindow : Window
     {
         ImGui.SetCursorPosX(ImGui.GetCursorPosX() + ImGui.GetFrameHeight() * 1.6f);
         var v = voices;
-        if (ImGui.Checkbox("Emotes and voices", ref v))
+        if (ImGui.Checkbox("Emotes", ref v))
         {
             setVoices(v);
             plugin.Save();
         }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Their emotes (the voice and sound effects like clapping),\nplus battle shouts and other voices.");
         ImGui.SameLine();
-        using (ImRaii.Disabled())
+        var f = footsteps;
+        if (ImGui.Checkbox("Footsteps", ref f))
         {
-            var f = footsteps;
-            ImGui.Checkbox("Footsteps", ref f);
-            ImGui.SameLine();
-            var k = skills;
-            ImGui.Checkbox("Skills and actions", ref k);
+            setFootsteps(f);
+            plugin.Save();
+            plugin.Individual.Refresh();
         }
-        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-            ImGui.SetTooltip("Coming in a later update.");
+        ImGui.SameLine();
+        var k = skills;
+        if (ImGui.Checkbox("Skills and actions", ref k))
+        {
+            setSkills(k);
+            plugin.Save();
+            plugin.Individual.Refresh();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Sounds of skills, spells and effects, mounting and other animations.");
     }
 
     private static void Divider()
@@ -1078,6 +1087,17 @@ public sealed class MainWindow : Window
             }
             if (remove != null)
                 ind.Remove(remove);
+
+            // A part that couldn't be set up (most likely after a game patch) says so here.
+            ImGuiHelpers.ScaledDummy(3f);
+            var broken = new List<string>();
+            if (!ind.VoiceMutingWorks) broken.Add("emotes");
+            if (!ind.FootstepMutingWorks) broken.Add("footsteps");
+            if (!ind.SkillMutingWorks) broken.Add("skills and emote sound effects");
+            if (!ind.EmoteEffectMutingWorks) broken.Add("emote sound effects");
+            if (broken.Count > 0)
+                Theme.Wrapped($"Muting {string.Join(", ", broken)} isn't working right now (most likely a game patch moved things; it comes back with an update).", Theme.Amber);
+
         });
     }
 
@@ -1224,7 +1244,7 @@ public sealed class MainWindow : Window
                         ImGui.CloseCurrentPopup();
                 }
             }
-            Theme.Wrapped("For now this mutes the emote's voice. Emote sound effects that aren't voices follow with the skills step.", Theme.Muted);
+            Theme.Wrapped("Mutes the emote's voice and its sound effects (like clapping).", Theme.Muted);
         });
     }
 

@@ -9,6 +9,8 @@ using Dalamud.Game.Text.SeStringHandling.Payloads;
 using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
+using FFXIVClientStructs.FFXIV.Client.Game.Object;
+using FFXIVClientStructs.FFXIV.Client.System.Scheduler.Base;
 
 namespace WillOMuter;
 
@@ -34,7 +36,7 @@ public class MutedPerson
     public bool Enabled { get; set; } = true;
     public PersonSounds Sounds { get; set; } = PersonSounds.Muted;
 
-    /// <summary>Mute their emote voices, battle shouts and other character sounds.</summary>
+    /// <summary>"Emotes": their emotes (voice and sound effects like clapping), battle shouts and other voices.</summary>
     public bool MuteVoices { get; set; } = true;
 
     /// <summary>Mute their footsteps (not working yet: coming in a later test build).</summary>
@@ -99,14 +101,49 @@ public sealed unsafe class Individual : IDisposable
     private readonly IPluginLog log;
     private readonly Hook<LoadCharacterSoundDelegate>? voiceHook;
 
+    // Sounds of animations and effects (skills, emote sound effects like clapping, mounting…). The game's own
+    // function got merged into its caller, so the caller is intercepted and the character is read from its data.
+    // Search pattern and memory positions as published by Penumbra (Penumbra.GameData Signatures and Penumbra's
+    // VolatileOffsets); the positions can move with a game patch, which is why everything is checked first.
+    private const string AnimationSoundSignature = "4C 8B DC 56 48 81 EC ?? ?? ?? ?? F3 0F 10 89";
+    private const int PlayTimeOffset = 0x254;
+    private const int IntermediateOffset = 0x1F8;
+    private const int FlagsOffset = 0x4A8;
+    private const int ListenerOffset = 0x270;
+    private const int FlagsBit = 13;
+    private const int CasterVirtualFunction = 1;
+    private delegate nint AnimationSoundDelegate(nint self, nint unused, float timeOffset);
+    private readonly Hook<AnimationSoundDelegate>? skillHook;
+
+    // Footsteps (search pattern as published by Penumbra.GameData).
+    private const string FootstepSignature = "E9 ?? ?? ?? ?? 49 8B CE E8 ?? ?? ?? ?? 8B F8";
+    private delegate void FootstepDelegate(GameObject* gameObject, int id, int unk);
+    private readonly Hook<FootstepDelegate>? footstepHook;
+
+    // Timeline parts of emotes (the sound effects of /clap, /water…). Called when a character's action timeline
+    // moves on; skipping it for a muted character keeps that step's sounds from starting.
+    // Search pattern as published by Penumbra.GameData (ScheduleClipUpdate); the timeline sits at 0x38.
+    private const string ClipUpdateSignature = "40 53 55 56 57 48 81 EC ?? ?? ?? ?? 48 8B F9";
+    private const int ClipTimelineOffset = 0x38;
+    private delegate void ClipUpdateDelegate(nint clipScheduler);
+    private readonly Hook<ClipUpdateDelegate>? clipHook;
+
     // Addresses of the characters (and their mounts, minions and accessories) whose sounds are muted right now.
     // Rebuilt a few times a second on the game's thread; the sound function runs on that thread too.
-    private HashSet<nint> mutedObjects = new();
+    private HashSet<nint> mutedObjects = new();     // voices
+    private HashSet<nint> mutedFootsteps = new();
+    private HashSet<nint> mutedSkills = new();
+    private HashSet<nint> mutedSkillDraw = new();   // the same characters' draw objects (another way to recognise them)
+    private Dictionary<nint, nint> emoteDrawOwner = new(); // draw object -> character, for people with "Emotes" muted
+
     private nint localPlayer;
     private DateTime lastScan = DateTime.MinValue;
 
     /// <summary>Whether muting voices works (false when the game function couldn't be found, e.g. right after a patch).</summary>
     public bool VoiceMutingWorks => voiceHook is { IsEnabled: true };
+    public bool FootstepMutingWorks => footstepHook is { IsEnabled: true };
+    public bool SkillMutingWorks => skillHook is { IsEnabled: true };
+    public bool EmoteEffectMutingWorks => clipHook is { IsEnabled: true };
 
     /// <summary>How many sounds were skipped since the plugin started (shown in the test build).</summary>
     public int SkippedSounds { get; private set; }
@@ -143,6 +180,43 @@ public sealed unsafe class Individual : IDisposable
             voiceHook = null;
             log.Error(ex, "Couldn't set up muting of individual players' voices; that part is turned off.");
         }
+
+        // Each one on its own: if a game patch broke one, only that kind of sound stops being muted.
+        try
+        {
+            footstepHook = interop.HookFromSignature<FootstepDelegate>(FootstepSignature, FootstepDetour);
+            footstepHook.Enable();
+        }
+        catch (Exception ex)
+        {
+            footstepHook?.Dispose();
+            footstepHook = null;
+            log.Warning(ex, "Couldn't set up muting of footsteps; that part is turned off.");
+        }
+
+        try
+        {
+            skillHook = interop.HookFromSignature<AnimationSoundDelegate>(AnimationSoundSignature, AnimationSoundDetour);
+            skillHook.Enable();
+        }
+        catch (Exception ex)
+        {
+            skillHook?.Dispose();
+            skillHook = null;
+            log.Warning(ex, "Couldn't set up muting of skill and emote sound effects; that part is turned off.");
+        }
+
+        try
+        {
+            clipHook = interop.HookFromSignature<ClipUpdateDelegate>(ClipUpdateSignature, ClipUpdateDetour);
+            clipHook.Enable();
+        }
+        catch (Exception ex)
+        {
+            clipHook?.Dispose();
+            clipHook = null;
+            log.Warning(ex, "Couldn't set up muting of emote sound effects; that part is turned off.");
+        }
     }
 
     public void Dispose()
@@ -150,6 +224,9 @@ public sealed unsafe class Individual : IDisposable
         chat.ChatMessage -= OnChat;
         contextMenu.OnMenuOpened -= OnMenuOpened;
         voiceHook?.Dispose();
+        footstepHook?.Dispose();
+        skillHook?.Dispose();
+        clipHook?.Dispose();
     }
 
     public MutedPerson? Find(string name, uint worldId)
@@ -248,15 +325,20 @@ public sealed unsafe class Individual : IDisposable
 
     private static string Cap(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
 
-    /// <summary>On the game's thread: a few times a second, work out whose voices are muted.</summary>
+    /// <summary>On the game's thread: a few times a second, work out whose voices, footsteps and skill sounds are muted.</summary>
     public void Update()
     {
         localPlayer = objects.LocalPlayer?.Address ?? 0;
         var listOn = config.AllEnabled && config.IndividualEnabled && config.MutedPeople.Count > 0;
-        var rulesOn = config.AllEnabled && config.RaceRulesEnabled && config.RaceRules.Any(r => r.Enabled && r.MuteVoices);
+        var rulesOn = config.AllEnabled && config.RaceRulesEnabled
+                      && config.RaceRules.Any(r => r.Enabled && (r.MuteVoices || r.MuteFootsteps || r.MuteSkills));
         if (!listOn && !rulesOn)
         {
             if (mutedObjects.Count > 0) mutedObjects = new HashSet<nint>();
+            if (mutedFootsteps.Count > 0) mutedFootsteps = new HashSet<nint>();
+            if (mutedSkills.Count > 0) mutedSkills = new HashSet<nint>();
+            if (mutedSkillDraw.Count > 0) mutedSkillDraw = new HashSet<nint>();
+            if (emoteDrawOwner.Count > 0) emoteDrawOwner = new Dictionary<nint, nint>();
             return;
         }
 
@@ -267,20 +349,29 @@ public sealed unsafe class Individual : IDisposable
 
         var local = objects.LocalPlayer;
         var myTag = local?.CompanyTag.TextValue ?? string.Empty;
-        var muted = new HashSet<nint>();
+        var voices = new HashSet<nint>();
+        var footsteps = new HashSet<nint>();
+        var skills = new HashSet<nint>();
+        var skillDraw = new HashSet<nint>();
+        var emoteDraw = new Dictionary<nint, nint>();
         foreach (var obj in objects)
         {
             if (obj is not IPlayerCharacter pc || pc.Address == IntPtr.Zero)
                 continue;
             var name = pc.Name.TextValue;
             var world = pc.HomeWorld.RowId;
+            var c = (Character*)pc.Address;
 
-            var voices = false;
-            if (listOn && Find(name, world) is { Enabled: true, MuteVoices: true })
-                voices = true;
+            bool v = false, f = false, k = false;
+            if (listOn && Find(name, world) is { Enabled: true } p)
+            {
+                v = p.MuteVoices;
+                f = p.MuteFootsteps;
+                k = p.MuteSkills;
+            }
 
             // Race and gender rules: never for yourself, WhiteList people, and (when chosen) party, friends and FC.
-            if (!voices && rulesOn && pc.Address != local?.Address && FindWhite(name, world) == null)
+            if (rulesOn && pc.Address != local?.Address && FindWhite(name, world) == null)
             {
                 var flags = pc.StatusFlags;
                 var skip = (config.RaceSkipParty && (flags.HasFlag(StatusFlags.PartyMember) || flags.HasFlag(StatusFlags.AllianceMember)))
@@ -288,25 +379,179 @@ public sealed unsafe class Individual : IDisposable
                                || (myTag.Length > 0 && pc.CompanyTag.TextValue == myTag)));
                 if (!skip)
                 {
-                    var c0 = (Character*)pc.Address;
-                    var race = c0->DrawData.CustomizeData.Data[0];
-                    var gender = c0->DrawData.CustomizeData.Data[1];
-                    voices = config.RaceRules.Any(r => r.Enabled && r.MuteVoices
-                                                        && (r.Race == 0 || r.Race == race)
-                                                        && (r.Gender < 0 || r.Gender == gender));
+                    var race = c->DrawData.CustomizeData.Data[0];
+                    var gender = c->DrawData.CustomizeData.Data[1];
+                    foreach (var r in config.RaceRules)
+                    {
+                        if (!r.Enabled || (r.Race != 0 && r.Race != race) || (r.Gender >= 0 && r.Gender != gender))
+                            continue;
+                        v |= r.MuteVoices;
+                        f |= r.MuteFootsteps;
+                        k |= r.MuteSkills;
+                    }
                 }
             }
-            if (!voices)
-                continue;
 
             // The person, plus their mount, minion and fashion accessory (separate objects with their own sounds).
-            var c = (Character*)pc.Address;
-            muted.Add(pc.Address);
-            if (c->Mount.MountObject != null) muted.Add((nint)c->Mount.MountObject);
-            if (c->CompanionData.CompanionObject != null) muted.Add((nint)c->CompanionData.CompanionObject);
-            if (c->OrnamentData.OrnamentObject != null) muted.Add((nint)c->OrnamentData.OrnamentObject);
+            if (v)
+            {
+                AddWithParts(voices, c);
+                if (c->GameObject.DrawObject != null)
+                    emoteDraw[(nint)c->GameObject.DrawObject] = (nint)c;
+            }
+            if (f) AddWithParts(footsteps, c);
+            if (k)
+            {
+                AddWithParts(skills, c);
+                if (c->GameObject.DrawObject != null)
+                    skillDraw.Add((nint)c->GameObject.DrawObject);
+                if (c->Mount.MountObject != null && c->Mount.MountObject->GameObject.DrawObject != null)
+                    skillDraw.Add((nint)c->Mount.MountObject->GameObject.DrawObject);
+            }
         }
-        mutedObjects = muted;
+        mutedObjects = voices;
+        mutedFootsteps = footsteps;
+        mutedSkills = skills;
+        mutedSkillDraw = skillDraw;
+        emoteDrawOwner = emoteDraw;
+    }
+
+    private static void AddWithParts(HashSet<nint> set, Character* c)
+    {
+        set.Add((nint)c);
+        if (c->Mount.MountObject != null) set.Add((nint)c->Mount.MountObject);
+        if (c->CompanionData.CompanionObject != null) set.Add((nint)c->CompanionData.CompanionObject);
+        if (c->OrnamentData.OrnamentObject != null) set.Add((nint)c->OrnamentData.OrnamentObject);
+    }
+
+    /// <summary>Emotes tab: is this player doing an emote that's muted for everyone?</summary>
+    private bool EmoteMuted(Character* owner)
+        => config.AllEnabled && config.EmotesEnabled && config.MutedEmotes.Count > 0
+           && owner->GameObject.ObjectKind == FFXIVClientStructs.FFXIV.Client.Game.Object.ObjectKind.Pc
+           && (config.EmotesMuteSelf || (nint)owner != localPlayer)
+           && owner->EmoteController.EmoteId != 0
+           && config.MutedEmotes.Contains(owner->EmoteController.EmoteId);
+
+    private void ClipUpdateDetour(nint clipScheduler)
+    {
+        try
+        {
+            if (clipScheduler != 0 && (mutedObjects.Count > 0 || (config.EmotesEnabled && config.MutedEmotes.Count > 0)))
+            {
+                var owner = ClipOwner(clipScheduler);
+                if (owner != null)
+                {
+                    var emote = owner->EmoteController.EmoteId;
+                    // Only while they're doing an emote, so their skills, mount and other effects stay as they are.
+                    var mute = emote != 0 && (mutedObjects.Contains((nint)owner) || EmoteMuted(owner));
+                    if (mute)
+                    {
+                        SkippedSounds++;
+                        return;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            log.Error(ex, "Checking an emote's timeline failed; letting it play.");
+        }
+        clipHook!.Original(clipScheduler);
+    }
+
+    /// <summary>The player a timeline step belongs to, or null when that isn't a player character.</summary>
+    private static Character* ClipOwner(nint clipScheduler)
+    {
+        var timeline = *(SchedulerTimeline**)(clipScheduler + ClipTimelineOffset);
+        if (timeline == null)
+            return null;
+        var index = timeline->GetOwningGameObjectIndex();
+        if (index < 0 || index >= 200)
+            return null;
+        var obj = GameObjectManager.Instance()->Objects.IndexSorted[index].Value;
+        if (obj == null || !obj->IsCharacter()
+            || obj->ObjectKind != FFXIVClientStructs.FFXIV.Client.Game.Object.ObjectKind.Pc)
+            return null;
+        return (Character*)obj;
+    }
+
+    private void FootstepDetour(GameObject* gameObject, int id, int unk)
+    {
+        try
+        {
+            if (gameObject != null && mutedFootsteps.Count > 0 && mutedFootsteps.Contains((nint)gameObject))
+            {
+                SkippedSounds++;
+                return; // no footstep
+            }
+        }
+        catch (Exception ex)
+        {
+            log.Error(ex, "Checking a footstep failed; letting it play.");
+        }
+        footstepHook!.Original(gameObject, id, unk);
+    }
+
+    private nint AnimationSoundDetour(nint self, nint unused, float timeOffset)
+    {
+        try
+        {
+            if (self != 0)
+            {
+                var (ownerPtr, draw) = AnimationSoundOwner(self);
+                var mute = false;
+                if (ownerPtr != 0)
+                {
+                    var owner = (GameObject*)ownerPtr;
+                    var doingEmote = owner->IsCharacter() && ((Character*)owner)->EmoteController.EmoteId != 0;
+                    mute = mutedSkills.Contains(ownerPtr)
+                           // "Emotes" for that person: their emote's sound effects (like clapping) too.
+                           || (doingEmote && mutedObjects.Contains(ownerPtr))
+                           || (owner->IsCharacter() && EmoteMuted((Character*)owner));
+                }
+                else if (draw != 0)
+                {
+                    // Only the model is known: the character it belongs to (from the last check) decides.
+                    mute = mutedSkillDraw.Contains(draw)
+                           || (emoteDrawOwner.TryGetValue(draw, out var ch) && ((Character*)ch)->EmoteController.EmoteId != 0);
+                }
+                if (mute)
+                {
+                    SkippedSounds++;
+                    return 0; // the game itself returns early like this when there's nothing to play
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            log.Error(ex, "Checking a skill or emote sound failed; letting it play.");
+        }
+        return skillHook!.Original(self, unused, timeOffset);
+    }
+
+    /// <summary>
+    /// Who an animation or effect sound belongs to: the character (when the sound's listener can tell), or else the
+    /// draw object the listener belongs to. Every step is checked like the game does; anything unclear plays normally.
+    /// </summary>
+    private static (nint Owner, nint Draw) AnimationSoundOwner(nint self)
+    {
+        if (*(float*)(self + PlayTimeOffset) < 0)
+            return (0, 0);
+        var intermediate = *(nint*)(self + IntermediateOffset);
+        if (intermediate == 0 || ((*(ushort*)(intermediate + FlagsOffset) >> FlagsBit) & 1) == 0)
+            return (0, 0);
+        var listener = *(nint*)(intermediate + ListenerOffset);
+        if (listener == 0)
+            return (0, 0);
+
+        var vtable = *(delegate* unmanaged<nint, GameObject*>**)listener;
+        var caster = vtable[CasterVirtualFunction](listener);
+        if (caster != null)
+            return ((nint)caster, 0);
+
+        // Effect listeners keep the draw object right after their virtual table; for other kinds this is just a
+        // number that won't be in the muted sets.
+        return (0, ((nint*)listener)[1]);
     }
 
     private nint LoadCharacterSoundDetour(
@@ -324,11 +569,7 @@ public sealed unsafe class Individual : IDisposable
                 }
 
                 // Emotes muted for everyone: the emote this player is doing right now.
-                if (config.AllEnabled && config.EmotesEnabled && config.MutedEmotes.Count > 0
-                    && owner->GameObject.ObjectKind == FFXIVClientStructs.FFXIV.Client.Game.Object.ObjectKind.Pc
-                    && (config.EmotesMuteSelf || (nint)owner != localPlayer)
-                    && owner->EmoteController.EmoteId != 0
-                    && config.MutedEmotes.Contains(owner->EmoteController.EmoteId))
+                if (EmoteMuted(owner))
                 {
                     SkippedSounds++;
                     return 0;
