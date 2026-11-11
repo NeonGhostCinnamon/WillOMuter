@@ -369,6 +369,8 @@ public sealed class MainWindow : Window
             ImGui.SetTooltip(tip);
         ImGui.SetNextItemWidth(width);
         var changed = ImGui.SliderInt(id, ref value, min, max, format);
+        if (changed)
+            value = Math.Clamp(value, min, max); // a typed (Ctrl+click) value can be outside the slider
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip(tip + "\nCtrl+click to type a value.");
         if (ImGui.IsItemDeactivatedAfterEdit())
