@@ -29,6 +29,29 @@ public class Configuration : IPluginConfiguration
     /// <summary>Dark (default), Light or Dalamud, like Will-o-Patchwisp.</summary>
     public ThemeMode ThemeChoice { get; set; } = ThemeMode.Dark;
 
+    // ---- server info bar (the entry at the top right of the screen; Umbra can show it too)
+
+    /// <summary>Show Will-o-Muter in the server info bar.</summary>
+    public bool DtrShown { get; set; } = true;
+
+    /// <summary>Always show it (with the "not muting" text), not only while muting.</summary>
+    public bool DtrAlways { get; set; } = false;
+
+    public string DtrMutingText { get; set; } = DefaultMutingText;
+    public string DtrIdleText { get; set; } = DefaultIdleText;
+    public const string DefaultMutingText = "Muting crowd";
+    public const string DefaultIdleText = "Crowd";
+
+    /// <summary>Add " · 14" (players nearby).</summary>
+    public bool DtrShowCount { get; set; } = true;
+
+    /// <summary>Colour choice (index into <see cref="DtrColors"/>; 0 = the game's default colour).</summary>
+    public int DtrMutingColor { get; set; } = 1;
+    public int DtrIdleColor { get; set; } = 0;
+
+    /// <summary>Left-click turns Will-o-Muter on/off (otherwise it opens the settings). Right-click always opens them.</summary>
+    public bool DtrClickToggles { get; set; } = true;
+
     // Persisted so a crash while muted doesn't leave your ambient volume at 0.
     public bool IsMuted { get; set; } = false;
     public uint SavedVolume { get; set; } = 100;

@@ -140,6 +140,7 @@ public sealed class MainWindow : Window
 
         DrawStatusCard();
         DrawSettingsCard();
+        DrawServerBarCard();
         DrawFooter();
     }
 
@@ -393,6 +394,160 @@ public sealed class MainWindow : Window
         if (ImGui.IsItemDeactivatedAfterEdit())
             plugin.Save();
         ImGuiHelpers.ScaledDummy(2f);
+        return changed;
+    }
+
+    // ---------------------------------------------------------------- server info bar card
+
+    private void DrawServerBarCard()
+    {
+        Theme.Card("serverbar", () =>
+        {
+            ImGui.TextColored(Theme.Text, "Server info bar");
+            Theme.BrandText("An entry at the top right of the screen (Umbra can show it too).", Theme.Muted, Theme.CardInnerRight);
+            ImGuiHelpers.ScaledDummy(2f);
+
+            var shown = Config.DtrShown;
+            if (ImGui.Checkbox("Show Will-o-Muter in the server info bar", ref shown))
+            {
+                Config.DtrShown = shown;
+                plugin.Save();
+            }
+            if (!Config.DtrShown)
+                return;
+
+            var w = Theme.CardInnerWidth;
+            Label("Show it");
+            ImGui.SetNextItemWidth(Math.Min(w, S(260)));
+            using (var combo = ImRaii.Combo("##dtrmode", Config.DtrAlways ? "Always" : "Only while muting a crowd"))
+            {
+                if (combo.Success)
+                {
+                    if (ImGui.Selectable("Only while muting a crowd", !Config.DtrAlways)) { Config.DtrAlways = false; plugin.Save(); }
+                    if (ImGui.Selectable("Always", Config.DtrAlways)) { Config.DtrAlways = true; plugin.Save(); }
+                }
+            }
+
+            Label("Text while muting");
+            TextSetting("##mutingtext", Config.DtrMutingText, Configuration.DefaultMutingText, v => Config.DtrMutingText = v, w);
+            if (Config.DtrAlways)
+            {
+                Label("Text when not muting");
+                TextSetting("##idletext", Config.DtrIdleText, Configuration.DefaultIdleText, v => Config.DtrIdleText = v, w);
+            }
+
+            ImGuiHelpers.ScaledDummy(2f);
+            var count = Config.DtrShowCount;
+            if (ImGui.Checkbox($"Add the number of players ( · {Plugin.LastCount} )", ref count))
+            {
+                Config.DtrShowCount = count;
+                plugin.Save();
+            }
+
+            Label("Colour while muting");
+            var c1 = Config.DtrMutingColor;
+            if (Swatches("##c1", ref c1)) { Config.DtrMutingColor = c1; plugin.Save(); }
+            if (Config.DtrAlways)
+            {
+                Label("Colour when not muting");
+                var c2 = Config.DtrIdleColor;
+                if (Swatches("##c2", ref c2)) { Config.DtrIdleColor = c2; plugin.Save(); }
+            }
+
+            // Preview: a dark strip like the game's bar, with the entry on the right.
+            Label("Preview");
+            var (text, color) = plugin.DtrLook();
+            var col = color >= 0 && color < Plugin.DtrColors.Length ? Plugin.DtrColors[color].Rgb : Plugin.DtrColors.Length > 0 ? Plugin.DtrColors[0].Rgb : Theme.Text;
+            var pos = ImGui.GetCursorScreenPos();
+            var h = ImGui.GetTextLineHeight() + S(8);
+            var dl = ImGui.GetWindowDrawList();
+            dl.AddRectFilled(pos, pos + new Vector2(w, h), ImGui.GetColorU32(new Vector4(0.06f, 0.06f, 0.08f, 1f)), S(6));
+            var clock = DateTime.Now.ToString("h:mm tt");
+            var cw = ImGui.CalcTextSize(clock).X;
+            var tw = ImGui.CalcTextSize(text).X;
+            var ty = pos.Y + S(4);
+            dl.AddText(new Vector2(pos.X + w - S(10) - cw, ty), ImGui.GetColorU32(new Vector4(0.91f, 0.90f, 0.87f, 1f)), clock);
+            dl.AddText(new Vector2(pos.X + w - S(10) - cw - S(16) - tw, ty), ImGui.GetColorU32(col), text);
+            ImGui.Dummy(new Vector2(w, h));
+            if (!Config.IsMuted && !Config.DtrAlways)
+                Theme.Wrapped("(Hidden right now: it only shows while muting.)", Theme.Muted);
+
+            Label("Clicking it");
+            ImGui.SetNextItemWidth(Math.Min(w, S(260)));
+            using (var combo = ImRaii.Combo("##dtrclick", Config.DtrClickToggles ? "Turns Will-o-Muter on/off" : "Opens the settings"))
+            {
+                if (combo.Success)
+                {
+                    if (ImGui.Selectable("Turns Will-o-Muter on/off", Config.DtrClickToggles)) { Config.DtrClickToggles = true; plugin.Save(); }
+                    if (ImGui.Selectable("Opens the settings", !Config.DtrClickToggles)) { Config.DtrClickToggles = false; plugin.Save(); }
+                }
+            }
+            Theme.Wrapped("Right-click always opens the settings.", Theme.Muted);
+        });
+    }
+
+    private static void Label(string text)
+    {
+        ImGuiHelpers.ScaledDummy(2f);
+        ImGui.TextColored(Theme.AccentText, text);
+    }
+
+    /// <summary>Text box (saved when you leave it) with a "Reset" link back to the default.</summary>
+    private void TextSetting(string id, string value, string fallback, Action<string> set, float width)
+    {
+        var resetW = ImGui.CalcTextSize("Reset").X;
+        ImGui.SetNextItemWidth(Math.Min(width - resetW - S(12), S(240)));
+        var v = value;
+        if (ImGui.InputTextWithHint(id, fallback, ref v, 40))
+        {
+            set(v);
+            plugin.Save();
+        }
+        ImGui.SameLine(0, S(10));
+        ImGui.AlignTextToFramePadding();
+        var link = ImGui.GetCursorScreenPos();
+        ImGui.TextColored(value == fallback ? Theme.Muted : Theme.AccentText, "Reset");
+        if (value != fallback && ImGui.IsItemHovered())
+        {
+            ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+            if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            {
+                set(fallback);
+                plugin.Save();
+            }
+        }
+    }
+
+    /// <summary>Row of colour dots; the first one is the game's default colour.</summary>
+    private static bool Swatches(string id, ref int selected)
+    {
+        var changed = false;
+        var d = ImGui.GetFrameHeight() * 0.8f;
+        var dl = ImGui.GetWindowDrawList();
+        var colors = Plugin.DtrColors;
+        for (var i = 0; i < colors.Length; i++)
+        {
+            if (i > 0)
+                ImGui.SameLine(0, S(7));
+            var pos = ImGui.GetCursorScreenPos();
+            if (ImGui.InvisibleButton($"{id}{i}", new Vector2(d, d)))
+            {
+                selected = i;
+                changed = true;
+            }
+            var hovered = ImGui.IsItemHovered();
+            var c = pos + new Vector2(d / 2f);
+            dl.AddCircleFilled(c, d / 2f - S(1), ImGui.GetColorU32(colors[i].Rgb), 24);
+            if (i == selected)
+                dl.AddCircle(c, d / 2f + S(2), ImGui.GetColorU32(Theme.Text), 24, S(1.8f));
+            else if (hovered)
+                dl.AddCircle(c, d / 2f + S(1), ImGui.GetColorU32(Theme.Muted), 24, S(1.2f));
+            if (hovered)
+            {
+                ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+                ImGui.SetTooltip(i == 0 ? "The game's default colour" : "Use this colour");
+            }
+        }
         return changed;
     }
 
