@@ -42,6 +42,7 @@ public sealed class Plugin : IDalamudPlugin
 
     /// <summary>Muting the sounds of specific people.</summary>
     public Individual Individual { get; }
+    private readonly ChatTwoMenu chatTwoMenu;
 
     private IDtrBarEntry? dtr;
     private string lastDtrKey = string.Empty;
@@ -114,6 +115,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         Individual = new Individual(config, Save, ObjectTable, Chat, ContextMenu, Interop, Log);
+        chatTwoMenu = new ChatTwoMenu(PluginInterface, Individual, Log);
         configWindow = new MainWindow(this);
         windows.AddWindow(configWindow);
 
@@ -326,6 +328,7 @@ public sealed class Plugin : IDalamudPlugin
     public void Dispose()
     {
         Framework.Update -= OnUpdate;
+        chatTwoMenu.Dispose();
         Individual.Dispose();
         CommandManager.RemoveHandler(Command);
         dtr?.Remove();
