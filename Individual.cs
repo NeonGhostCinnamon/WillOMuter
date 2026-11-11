@@ -364,6 +364,39 @@ public sealed unsafe class Individual : IDisposable
 
     // ---------------------------------------------------------------- right-click menu on players
 
+    private static ushort? pinkColor;
+
+    /// <summary>The game colour closest to the Will-o pink (#FF7EB6), for the boxed "O" in front of the menu entries.</summary>
+    private static ushort PinkColor()
+    {
+        if (pinkColor is { } cached)
+            return cached;
+        ushort best = 0;
+        var bestDist = double.MaxValue;
+        try
+        {
+            foreach (var row in Plugin.Data.GetExcelSheet<Lumina.Excel.Sheets.UIColor>())
+            {
+                var c = row.Dark; // 0xRRGGBBAA
+                if (c == 0 || row.RowId > ushort.MaxValue)
+                    continue;
+                double r = (c >> 24) & 0xFF, g = (c >> 16) & 0xFF, b = (c >> 8) & 0xFF;
+                var d = (r - 255) * (r - 255) + (g - 126) * (g - 126) + (b - 182) * (b - 182);
+                if (d < bestDist)
+                {
+                    bestDist = d;
+                    best = (ushort)row.RowId;
+                }
+            }
+        }
+        catch
+        {
+            // Colour list unreadable: the game's default colour is fine.
+        }
+        pinkColor = best;
+        return best;
+    }
+
     private void OnMenuOpened(IMenuOpenedArgs args)
     {
         // Right-click on a player anywhere: in the world, the target window, the party list, chat, and the social
@@ -411,8 +444,9 @@ public sealed unsafe class Individual : IDisposable
         var muted = Find(name, worldId);
         args.AddMenuItem(new MenuItem
         {
-            Name = muted == null ? "Add to MuteList (Will-o-Muter)" : "Remove from MuteList (Will-o-Muter)",
-            UseDefaultPrefix = true,
+            Name = muted == null ? "Add to MuteList" : "Remove from MuteList",
+            PrefixChar = 'O',
+            PrefixColor = PinkColor(),
             OnClicked = _ =>
             {
                 if (muted == null) Add(name, worldId, worldName);
@@ -422,8 +456,9 @@ public sealed unsafe class Individual : IDisposable
         var white = FindWhite(name, worldId);
         args.AddMenuItem(new MenuItem
         {
-            Name = white == null ? "Add to WhiteList (Will-o-Muter)" : "Remove from WhiteList (Will-o-Muter)",
-            UseDefaultPrefix = true,
+            Name = white == null ? "Add to WhiteList" : "Remove from WhiteList",
+            PrefixChar = 'O',
+            PrefixColor = PinkColor(),
             OnClicked = _ =>
             {
                 if (white == null) AddWhite(name, worldId, worldName);
