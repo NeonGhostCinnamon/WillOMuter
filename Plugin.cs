@@ -38,7 +38,7 @@ public sealed class Plugin : IDalamudPlugin
     /// The colours the server info bar entry can have: the game's default, then the game colours closest to
     /// pink, purple, blue, green, gold and red (the bar can only use the game's own colour list).
     /// </summary>
-    public static (ushort Row, Vector4 Rgb)[] DtrColors { get; private set; } = Array.Empty<(ushort, Vector4)>();
+    private static uint? OldColor(int index) => index > 0 && index <= QuickColors.Length ? QuickColors[index - 1] : null;
 
     private readonly Configuration config;
     private readonly WindowSystem windows = new("WillOMuter");
@@ -85,7 +85,14 @@ public sealed class Plugin : IDalamudPlugin
                 tk.AddDalamudDefaultFont(30);
         }));
 
-        LoadDtrColors();
+        // v3: the server info bar's colour became any RGB colour (it was a choice from a short list).
+        if (config.Version < 3)
+        {
+            config.DtrMutingRgb = OldColor(config.DtrMutingColor);
+            config.DtrIdleRgb = OldColor(config.DtrIdleColor);
+            config.Version = 3;
+            PluginInterface.SavePluginConfig(config);
+        }
         try
         {
             dtr = DtrBar.Get("Will-o-Muter");
@@ -217,51 +224,38 @@ public sealed class Plugin : IDalamudPlugin
 
     // ---------------------------------------------------------------- server info bar
 
-    private static readonly Vector4[] ColorTargets =
+    /// <summary>Quick colours in the colour picker (and what the old colour choices become).</summary>
+    public static readonly uint[] QuickColors =
     {
-        new(1.00f, 0.49f, 0.71f, 1f), // pink
-        new(0.69f, 0.50f, 1.00f, 1f), // purple
-        new(0.45f, 0.75f, 1.00f, 1f), // blue
-        new(0.47f, 0.86f, 0.59f, 1f), // green
-        new(0.95f, 0.77f, 0.42f, 1f), // gold
-        new(1.00f, 0.44f, 0.44f, 1f), // red
+        0xFF7EB6, // pink
+        0xB080FF, // purple
+        0x73BFFF, // blue
+        0x78DB96, // green
+        0xF2C46B, // gold
+        0xFF7070, // red
     };
 
-    private static void LoadDtrColors()
-    {
-        var list = new List<(ushort, Vector4)> { (0, new Vector4(0.91f, 0.90f, 0.87f, 1f)) };
-        try
-        {
-            var rows = Data.GetExcelSheet<UIColor>()
-                .Where(r => r.Dark != 0 && r.RowId <= ushort.MaxValue)
-                .Select(r => ((ushort)r.RowId, new Vector4(((r.Dark >> 24) & 0xFF) / 255f, ((r.Dark >> 16) & 0xFF) / 255f, ((r.Dark >> 8) & 0xFF) / 255f, 1f)))
-                .ToList();
-            foreach (var target in ColorTargets)
-            {
-                var best = rows.OrderBy(r => Vector3.DistanceSquared(new Vector3(r.Item2.X, r.Item2.Y, r.Item2.Z), new Vector3(target.X, target.Y, target.Z))).FirstOrDefault();
-                if (best.Item1 != 0)
-                    list.Add(best);
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Warning(ex, "Couldn't read the game's colours.");
-        }
-        DtrColors = list.ToArray();
-    }
+    /// <summary>The game's default text colour in the bar (for the preview and the "default" dot).</summary>
+    public static readonly Vector4 GameDefaultColor = new(0.91f, 0.90f, 0.87f, 1f);
 
-    /// <summary>The entry's text as it looks right now (also used for the preview in the window).</summary>
-    public (string Text, int Color) DtrLook()
+    public static Vector4 ToVector(uint? rgb) => rgb is { } c
+        ? new Vector4(((c >> 16) & 0xFF) / 255f, ((c >> 8) & 0xFF) / 255f, (c & 0xFF) / 255f, 1f)
+        : GameDefaultColor;
+
+    public static uint FromVector(Vector4 v)
+        => ((uint)Math.Round(Math.Clamp(v.X, 0, 1) * 255) << 16) | ((uint)Math.Round(Math.Clamp(v.Y, 0, 1) * 255) << 8) | (uint)Math.Round(Math.Clamp(v.Z, 0, 1) * 255);
+
+    /// <summary>The entry's text and colour for the muting or the not-muting state ("" = nothing to show).</summary>
+    public (string Text, uint? Rgb) DtrLook(bool muted)
     {
-        var muted = config.IsMuted;
-        var text = muted ? config.DtrMutingText : config.DtrIdleText;
-        if (string.IsNullOrWhiteSpace(text))
-            text = muted ? Configuration.DefaultMutingText : Configuration.DefaultIdleText;
+        var on = muted ? config.DtrMutingTextOn : config.DtrIdleTextOn;
+        var label = on ? (muted ? config.DtrMutingText : config.DtrIdleText).Trim() : string.Empty;
+        var text = label;
         if (config.DtrShowCount && config.Enabled)
-            text += $" · {LastCount}";
+            text = text.Length > 0 ? $"{text} · {LastCount}" : LastCount.ToString();
         if (!config.Enabled)
-            text += " (off)";
-        return (text, muted ? config.DtrMutingColor : config.DtrIdleColor);
+            text = text.Length > 0 ? $"{text} (off)" : "Will-o-Muter (off)";
+        return (text, muted ? config.DtrMutingRgb : config.DtrIdleRgb);
     }
 
     private void UpdateDtr()
@@ -269,9 +263,9 @@ public sealed class Plugin : IDalamudPlugin
         if (dtr == null)
             return;
 
-        var shown = config.DtrShown && (config.DtrAlways || config.IsMuted);
-        var (text, color) = DtrLook();
-        var key = $"{shown}|{text}|{color}|{config.Enabled}|{config.IsMuted}|{config.DtrClickToggles}|{LastCount}|{config.MuteAtPlayers}|{config.UnmuteMargin}";
+        var (text, rgb) = DtrLook(config.IsMuted);
+        var shown = config.DtrShown && (config.DtrAlways || config.IsMuted) && text.Length > 0;
+        var key = $"{shown}|{text}|{rgb}|{config.Enabled}|{config.IsMuted}|{config.DtrClickToggles}|{LastCount}|{config.MuteAtPlayers}|{config.UnmuteMargin}";
         if (key == lastDtrKey)
             return;
         lastDtrKey = key;
@@ -280,10 +274,7 @@ public sealed class Plugin : IDalamudPlugin
         if (!shown)
             return;
 
-        var row = color > 0 && color < DtrColors.Length ? DtrColors[color].Row : (ushort)0;
-        dtr.Text = row != 0
-            ? new SeStringBuilder().AddUiForeground(text, row).Build()
-            : new SeStringBuilder().AddText(text).Build();
+        dtr.Text = Colored(text, rgb);
 
         var unmuteBelow = Math.Max(1, config.MuteAtPlayers - config.UnmuteMargin);
         var state = !config.Enabled ? "turned off" : config.IsMuted ? "ambient sounds muted" : "not muting";
@@ -293,6 +284,20 @@ public sealed class Plugin : IDalamudPlugin
         dtr.Tooltip = new SeStringBuilder()
             .AddText($"Will-o-Muter: {state}\n{LastCount} players nearby (mutes at {config.MuteAtPlayers}, unmutes below {unmuteBelow})\n{click}")
             .Build();
+    }
+
+    /// <summary>Text in any colour (the game's own colour list only has a few dozen; this takes any RGB).</summary>
+    private static unsafe SeString Colored(string text, uint? rgb)
+    {
+        if (rgb == null)
+            return new SeStringBuilder().AddText(text).Build();
+        var b = new Lumina.Text.SeStringBuilder();
+        b.PushColorRgba(ToVector(rgb));
+        b.Append(text);
+        b.PopColor();
+        var bytes = b.ToArray();
+        fixed (byte* p = bytes)
+            return SeString.Parse(p, bytes.Length);
     }
 
     private void OnDtrClick(DtrInteractionEvent e)

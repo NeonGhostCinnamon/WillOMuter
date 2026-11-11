@@ -6,7 +6,7 @@ namespace WillOMuter;
 [Serializable]
 public class Configuration : IPluginConfiguration
 {
-    public int Version { get; set; } = 2;
+    public int Version { get; set; } = 3;
 
     /// <summary>Whether Will-o-Muter is enabled.</summary>
     public bool Enabled { get; set; } = true;
@@ -40,12 +40,22 @@ public class Configuration : IPluginConfiguration
     public string DtrMutingText { get; set; } = DefaultMutingText;
     public string DtrIdleText { get; set; } = DefaultIdleText;
     public const string DefaultMutingText = "Muting crowd";
-    public const string DefaultIdleText = "Crowd";
+    /// <summary>Blank: when not muting, the entry shows just the number of players.</summary>
+    public const string DefaultIdleText = "";
+
+    /// <summary>Show the text at all (off: only the number of players).</summary>
+    public bool DtrMutingTextOn { get; set; } = true;
+    public bool DtrIdleTextOn { get; set; } = true;
+
+    /// <summary>Text colour as 0xRRGGBB; null = the game's default colour.</summary>
+    public uint? DtrMutingRgb { get; set; } = DefaultMutingRgb;
+    public uint? DtrIdleRgb { get; set; }
+    public const uint DefaultMutingRgb = 0xFF7EB6;
 
     /// <summary>Add " · 14" (players nearby).</summary>
     public bool DtrShowCount { get; set; } = true;
 
-    /// <summary>Colour choice (index into <see cref="DtrColors"/>; 0 = the game's default colour).</summary>
+    /// <summary>Old colour choice (before version 3): index into the old colour list; 0 = the game's default colour.</summary>
     public int DtrMutingColor { get; set; } = 1;
     public int DtrIdleColor { get; set; } = 0;
 
