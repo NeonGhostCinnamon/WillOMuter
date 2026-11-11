@@ -1027,7 +1027,7 @@ public sealed class MainWindow : Window
                     addName = string.Empty;
                 }
             }
-            Theme.Wrapped($"Or right-click someone in chat, the party list, the target window, the social windows or the world: \"Add to {(showWhiteList ? "WhiteList" : "MuteList")}\" (with the pink O).", Theme.Muted);
+            Theme.Wrapped($"Or right-click someone in chat, the party list, the target window, the social windows or the world: \"{(showWhiteList ? "WhiteList" : "MuteList")} in Muter\" (with the pink O). In Chat 2 it's under \"Integrations\".", Theme.Muted);
 
             // ---- the list
             var count = showWhiteList ? Config.WhiteList.Count : Config.MutedPeople.Count;

@@ -677,34 +677,44 @@ public sealed unsafe class Individual : IDisposable
         }
 
         // Only real players: "First Last" on a public server.
+        if (Player(name, worldId) is not { } player)
+            return;
+
+        foreach (var (label, click) in MenuEntries(player.Name, player.WorldId, player.WorldName))
+        {
+            args.AddMenuItem(new MenuItem
+            {
+                Name = label,
+                PrefixChar = 'O',
+                PrefixColor = PinkColor(),
+                OnClicked = _ => click(),
+            });
+        }
+    }
+
+    /// <summary>
+    /// The right-click entries for a player ("MuteList in Muter", "WhiteList in Muter", or their "Remove from"
+    /// versions), shared by the game's menus and Chat 2's.
+    /// </summary>
+    public List<(string Label, Action Click)> MenuEntries(string name, uint worldId, string worldName)
+    {
+        var muted = Find(name, worldId);
+        var white = FindWhite(name, worldId);
+        return new List<(string, Action)>
+        {
+            (muted == null ? "MuteList in Muter" : "Remove from MuteList in Muter",
+                () => { if (muted == null) Add(name, worldId, worldName); else Remove(muted); }),
+            (white == null ? "WhiteList in Muter" : "Remove from WhiteList in Muter",
+                () => { if (white == null) AddWhite(name, worldId, worldName); else RemoveWhite(white); }),
+        };
+    }
+
+    /// <summary>A real player's name and home server, or null for anything else.</summary>
+    public static (string Name, uint WorldId, string WorldName)? Player(string? name, uint worldId)
+    {
         var world = Worlds().FirstOrDefault(w => w.Id == worldId);
         if (string.IsNullOrWhiteSpace(name) || world.Id == 0 || name.Trim().Split(' ').Length != 2)
-            return;
-        var worldName = world.Name;
-
-        var muted = Find(name, worldId);
-        args.AddMenuItem(new MenuItem
-        {
-            Name = muted == null ? "Add to MuteList" : "Remove from MuteList",
-            PrefixChar = 'O',
-            PrefixColor = PinkColor(),
-            OnClicked = _ =>
-            {
-                if (muted == null) Add(name, worldId, worldName);
-                else Remove(muted);
-            },
-        });
-        var white = FindWhite(name, worldId);
-        args.AddMenuItem(new MenuItem
-        {
-            Name = white == null ? "Add to WhiteList" : "Remove from WhiteList",
-            PrefixChar = 'O',
-            PrefixColor = PinkColor(),
-            OnClicked = _ =>
-            {
-                if (white == null) AddWhite(name, worldId, worldName);
-                else RemoveWhite(white);
-            },
-        });
+            return null;
+        return (name.Trim(), worldId, world.Name);
     }
 }
