@@ -366,14 +366,48 @@ public sealed unsafe class Individual : IDisposable
 
     private void OnMenuOpened(IMenuOpenedArgs args)
     {
-        if (args.Target is not MenuTargetDefault t || string.IsNullOrEmpty(t.TargetName) || t.TargetHomeWorld.RowId == 0)
-            return;
-        if (t.TargetObject is not null and not IPlayerCharacter)
+        // Right-click on a player anywhere: in the world, the target window, the party list, chat, and the social
+        // windows (friends, Free Company, linkshells, player search…). Each fills in different details, so take the
+        // name and home server from whichever is there.
+        if (args.MenuType != ContextMenuType.Default || args.Target is not MenuTargetDefault t)
             return;
 
-        var name = t.TargetName;
-        var worldId = t.TargetHomeWorld.RowId;
-        var worldName = t.TargetHomeWorld.ValueNullable?.Name.ExtractText() ?? string.Empty;
+        string? name = null;
+        uint worldId = 0;
+        try
+        {
+            if (t.TargetObject is IPlayerCharacter pc)
+            {
+                name = pc.Name.TextValue;
+                worldId = pc.HomeWorld.RowId;
+            }
+            else if (t.TargetObject != null)
+            {
+                return; // an NPC, a minion or anything else that isn't a player
+            }
+
+            if (string.IsNullOrEmpty(name))
+                name = t.TargetName;
+            if (worldId == 0)
+                worldId = t.TargetHomeWorld.RowId;
+            if ((string.IsNullOrEmpty(name) || worldId == 0) && t.TargetCharacter is { } cd)
+            {
+                if (string.IsNullOrEmpty(name)) name = cd.Name;
+                if (worldId == 0) worldId = cd.HomeWorld.RowId;
+            }
+        }
+        catch (Exception ex)
+        {
+            log.Debug(ex, $"Couldn't read the right-clicked player ({args.AddonName}).");
+            return;
+        }
+
+        // Only real players: "First Last" on a public server.
+        var world = Worlds().FirstOrDefault(w => w.Id == worldId);
+        if (string.IsNullOrWhiteSpace(name) || world.Id == 0 || name.Trim().Split(' ').Length != 2)
+            return;
+        var worldName = world.Name;
+
         var muted = Find(name, worldId);
         args.AddMenuItem(new MenuItem
         {
