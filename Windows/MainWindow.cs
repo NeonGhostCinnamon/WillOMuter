@@ -312,6 +312,7 @@ public sealed class MainWindow : Window
 
     private bool selectPeopleTab;
     private bool showWhiteList;
+    private bool colorDirty;
     private readonly HashSet<string> openPeople = new(); // MuteList people whose options are folded out
 
     private void ToggleOpen(string key)
@@ -854,6 +855,12 @@ public sealed class MainWindow : Window
         {
             pickerColor = new Vector4(c, 1f);
             setRgb(Plugin.FromVector(pickerColor));
+            colorDirty = true;
+        }
+        // Write the settings file once the colour is let go, not on every frame of dragging.
+        if (colorDirty && !ImGui.IsAnyItemActive())
+        {
+            colorDirty = false;
             plugin.Save();
         }
 
