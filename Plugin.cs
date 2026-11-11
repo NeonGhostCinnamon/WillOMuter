@@ -36,6 +36,9 @@ public sealed class Plugin : IDalamudPlugin
     private DateTime lastCheck = DateTime.MinValue;
     private DateTime belowSince = DateTime.MinValue;
 
+    // The player turned the ambient sounds back up while muted: leave them alone until this crowd is gone.
+    private bool playerOverride;
+
     /// <summary>Latest count, shown in the config window.</summary>
     public static int LastCount { get; private set; }
 
@@ -103,7 +106,21 @@ public sealed class Plugin : IDalamudPlugin
 
         if (!config.IsMuted)
         {
-            if (LastCount >= config.MuteAtPlayers) Mute();
+            if (playerOverride && LastCount < unmuteBelow)
+                playerOverride = false;
+            if (!playerOverride && LastCount >= config.MuteAtPlayers) Mute();
+            return;
+        }
+
+        // Muted, but the player set a volume in the game's settings: keep theirs instead of the saved one.
+        if (GameConfig.TryGet(SystemConfigOption.SoundEnv, out uint playerVolume) && playerVolume != 0)
+        {
+            config.SavedVolume = playerVolume;
+            config.IsMuted = false;
+            belowSince = DateTime.MinValue;
+            playerOverride = true;
+            Save();
+            Log.Debug($"Ambient volume changed to {playerVolume} while muted; not muting again until the crowd is gone.");
             return;
         }
 
