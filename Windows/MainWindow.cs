@@ -188,6 +188,30 @@ public sealed class MainWindow : Window
         }
         DrawFooter();
         fileDialog.Draw();
+        FitToContent();
+    }
+
+    private float lastContentHeight;
+
+    /// <summary>
+    /// A card was just collapsed or expanded: grow or shrink the window by exactly the height the content gained or
+    /// lost, so it never leaves an empty gap and never cuts anything off (a size you dragged it to is kept).
+    /// </summary>
+    private void FitToContent()
+    {
+        var height = ImGui.GetCursorPosY();
+        if (Theme.CardToggled)
+        {
+            Theme.CardToggled = false;
+            if (lastContentHeight > 0)
+            {
+                var size = ImGui.GetWindowSize();
+                var max = ImGui.GetMainViewport().WorkSize.Y * 0.95f;
+                var h = Math.Clamp(size.Y + (height - lastContentHeight), S(300), Math.Max(S(300), max));
+                sizeOnce = new Vector2(size.X, h) / ImGuiHelpers.GlobalScale;
+            }
+        }
+        lastContentHeight = height;
     }
 
     // ---------------------------------------------------------------- header
@@ -371,17 +395,6 @@ public sealed class MainWindow : Window
         });
     }
 
-    /// <summary>Card heading in the rounded title font, pink (Crowd, Emotes).</summary>
-    private void CardTitle(string text)
-    {
-        using (plugin.TitleFont.Available ? plugin.TitleFont.Push() : null)
-        {
-            ImGui.SetWindowFontScale(0.6f);
-            ImGui.TextColored(Theme.AccentText, text);
-            ImGui.SetWindowFontScale(1f);
-        }
-    }
-
     /// <summary>Shown at the top of every tab while everything is turned off.</summary>
     private void OffNote()
     {
@@ -422,19 +435,20 @@ public sealed class MainWindow : Window
             var top = ImGui.GetCursorScreenPos().Y;
 
             // Title, with the crowd on/off button and the status badge on the right.
-            CardTitle("Crowd");
-            var titleH = ImGui.GetItemRectSize().Y;
+            var open = Theme.CardHeader(plugin.TitleFont, "Crowd", Config.CollapsedCards, plugin.Save, $"{Plugin.LastCount} / {Config.MuteAtPlayers}");
             var (label, on) = StatusText();
             var icon = !Config.Enabled ? FontAwesomeIcon.PowerOff : on ? FontAwesomeIcon.VolumeMute : FontAwesomeIcon.VolumeUp;
             var h = ImGui.GetFrameHeight() + S(4);
             var gap = S(8);
             var bw = h + gap + Theme.StatusBadgeWidth(icon, label);
             var after = ImGui.GetCursorScreenPos();
-            ImGui.SetCursorScreenPos(new Vector2(right - bw, top + Math.Min(0, (titleH - h) / 2f)));
+            ImGui.SetCursorScreenPos(new Vector2(Theme.CardTitleRight - bw, top + Math.Min(0, (Theme.CardTitleHeight - h) / 2f)));
             DrawPowerButton(h);
             ImGui.SameLine(0, gap);
             Theme.StatusBadge(icon, label, on, h);
             ImGui.SetCursorScreenPos(new Vector2(left, Math.Max(after.Y, top + h + S(2))));
+            if (!open)
+                return;
 
             // "1 / 10" and a short line next to it.
             var count = Plugin.LastCount;
@@ -509,11 +523,11 @@ public sealed class MainWindow : Window
         Theme.Card("races", () =>
         {
             var right = Theme.CardInnerRight;
-            ImGui.TextColored(Theme.Text, "Races and genders");
-            var top = ImGui.GetItemRectMin().Y;
+            var open = Theme.CardHeader(plugin.TitleFont, "Races and genders", Config.CollapsedCards, plugin.Save,
+                Config.RaceRules.Count == 1 ? "1 rule" : $"{Config.RaceRules.Count} rules");
             var after = ImGui.GetCursorScreenPos();
             var sw = ImGui.GetFrameHeight() * 0.8f * 1.9f;
-            ImGui.SetCursorScreenPos(new Vector2(right - sw, top));
+            ImGui.SetCursorScreenPos(new Vector2(Theme.CardTitleRight - sw, Theme.CardTitleTop + Math.Max(0, (Theme.CardTitleHeight - ImGui.GetFrameHeight()) / 2f)));
             if (Switch("##raceson", Config.RaceRulesEnabled))
             {
                 Config.RaceRulesEnabled = !Config.RaceRulesEnabled;
@@ -523,6 +537,8 @@ public sealed class MainWindow : Window
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip(Config.RaceRulesEnabled ? "On. Click to turn all race and gender rules off." : "Off. Click to turn the rules on.");
             ImGui.SetCursorScreenPos(after);
+            if (!open)
+                return;
             Theme.BrandText("Mute the sounds of everyone of a race or gender. People on your WhiteList are never muted, and neither are you.", Theme.Muted, right);
 
             RaceRule? remove = null;
@@ -719,7 +735,8 @@ public sealed class MainWindow : Window
     {
         Theme.Card("serverbar", () =>
         {
-            ImGui.TextColored(Theme.Text, "Server info bar");
+            if (!Theme.CardHeader(plugin.TitleFont, "Server info bar", Config.CollapsedCards, plugin.Save, Config.DtrShown ? "shown" : "hidden"))
+                return;
             Theme.BrandText("An entry at the top right of the screen (Umbra can show it too).", Theme.Muted, Theme.CardInnerRight);
             ImGuiHelpers.ScaledDummy(2f);
 
@@ -984,16 +1001,15 @@ public sealed class MainWindow : Window
             var right = Theme.CardInnerRight;
             var w = Theme.CardInnerWidth;
 
-            // MuteList / WhiteList switch
-            if (Segment($"MuteList ({Config.MutedPeople.Count})", !showWhiteList)) showWhiteList = false;
-            ImGui.SameLine(0, 0);
-            if (Segment($"WhiteList ({Config.WhiteList.Count})", showWhiteList)) showWhiteList = true;
+            var cardOpen = Theme.CardHeader(plugin.TitleFont, "People", Config.CollapsedCards, plugin.Save,
+                $"{Config.MutedPeople.Count} muted · {Config.WhiteList.Count} white-listed");
             if (!showWhiteList)
             {
-                ImGui.SameLine();
+                var afterTitle = ImGui.GetCursorScreenPos();
                 var sw = ImGui.GetFrameHeight() * 0.8f * 1.9f;
                 var onText = Config.IndividualEnabled ? "On" : "Off";
-                ImGui.SetCursorScreenPos(new Vector2(right - sw - S(6) - ImGui.CalcTextSize(onText).X, ImGui.GetCursorScreenPos().Y));
+                ImGui.SetCursorScreenPos(new Vector2(Theme.CardTitleRight - sw - S(6) - ImGui.CalcTextSize(onText).X,
+                    Theme.CardTitleTop + Math.Max(0, (Theme.CardTitleHeight - ImGui.GetFrameHeight()) / 2f)));
                 if (Switch("##liston", Config.IndividualEnabled))
                 {
                     Config.IndividualEnabled = !Config.IndividualEnabled;
@@ -1005,7 +1021,15 @@ public sealed class MainWindow : Window
                 ImGui.SameLine(0, S(6));
                 ImGui.AlignTextToFramePadding();
                 ImGui.TextColored(Theme.TextSoft, onText);
+                ImGui.SetCursorScreenPos(afterTitle);
             }
+            if (!cardOpen)
+                return;
+
+            // MuteList / WhiteList switch
+            if (Segment($"MuteList ({Config.MutedPeople.Count})", !showWhiteList)) showWhiteList = false;
+            ImGui.SameLine(0, 0);
+            if (Segment($"WhiteList ({Config.WhiteList.Count})", showWhiteList)) showWhiteList = true;
 
             Theme.Wrapped(showWhiteList
                 ? "People who are never muted by the race and gender rules (your MuteList still applies to them)."
@@ -1224,11 +1248,10 @@ public sealed class MainWindow : Window
         {
             var right = Theme.CardInnerRight;
             var w = Theme.CardInnerWidth;
-            CardTitle("Emotes");
-            var top = ImGui.GetItemRectMin().Y;
+            var open = Theme.CardHeader(plugin.TitleFont, "Emotes", Config.CollapsedCards, plugin.Save, $"{Config.MutedEmotes.Count} muted");
             var after = ImGui.GetCursorScreenPos();
             var sw = ImGui.GetFrameHeight() * 0.8f * 1.9f;
-            ImGui.SetCursorScreenPos(new Vector2(right - sw, top));
+            ImGui.SetCursorScreenPos(new Vector2(Theme.CardTitleRight - sw, Theme.CardTitleTop + Math.Max(0, (Theme.CardTitleHeight - ImGui.GetFrameHeight()) / 2f)));
             if (Switch("##emoteson", Config.EmotesEnabled))
             {
                 Config.EmotesEnabled = !Config.EmotesEnabled;
@@ -1237,6 +1260,8 @@ public sealed class MainWindow : Window
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip(Config.EmotesEnabled ? "On. Click to stop muting these emotes." : "Off. Click to mute the emotes you picked.");
             ImGui.SetCursorScreenPos(after);
+            if (!open)
+                return;
             Theme.BrandText("Pick emotes to mute.", Theme.Muted, right);
 
             var self = Config.EmotesMuteSelf;
@@ -1346,7 +1371,8 @@ public sealed class MainWindow : Window
         Theme.Card("transfer", () =>
         {
             var w = Theme.CardInnerWidth;
-            ImGui.TextColored(Theme.Text, "Import / Export");
+            if (!Theme.CardHeader(plugin.TitleFont, "Import / Export", Config.CollapsedCards, plugin.Save))
+                return;
             Theme.Wrapped("Share your lists or keep a copy. One person per line: [Server] First Last", Theme.Muted);
             ImGuiHelpers.ScaledDummy(2f);
             if (ImGui.RadioButton($"MuteList ({Config.MutedPeople.Count})", !transferWhite)) transferWhite = false;

@@ -12,6 +12,9 @@ public class Configuration : IPluginConfiguration
     /// <summary>Everything in Will-o-Muter on or off (crowd, people, races, emotes and the server info bar).</summary>
     public bool AllEnabled { get; set; } = true;
 
+    /// <summary>Cards the player collapsed in the window (by card id), so they stay collapsed next time.</summary>
+    public HashSet<string> CollapsedCards { get; set; } = new();
+
     /// <summary>Whether crowd muting (the ambient sounds) is enabled.</summary>
     public bool Enabled { get; set; } = true;
 
