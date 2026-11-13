@@ -627,6 +627,7 @@ public sealed class MainWindow : Window
     private void SoundChoices(bool voices, Action<bool> setVoices, bool footsteps, Action<bool> setFootsteps, bool skills, Action<bool> setSkills, bool crafting, Action<bool> setCrafting)
     {
         ImGui.SetCursorPosX(ImGui.GetCursorPosX() + ImGui.GetFrameHeight() * 1.6f);
+        var indentX = ImGui.GetCursorPosX();
         var v = voices;
         if (ImGui.Checkbox("Emotes", ref v))
         {
@@ -635,7 +636,7 @@ public sealed class MainWindow : Window
         }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Their emotes (the voice and sound effects like clapping),\nplus battle shouts and other voices.");
-        ImGui.SameLine();
+        NextOnLine("Footsteps", indentX);
         var f = footsteps;
         if (ImGui.Checkbox("Footsteps", ref f))
         {
@@ -643,7 +644,7 @@ public sealed class MainWindow : Window
             plugin.Save();
             plugin.Individual.Refresh();
         }
-        ImGui.SameLine();
+        NextOnLine("Skills and actions", indentX);
         var k = skills;
         if (ImGui.Checkbox("Skills and actions", ref k))
         {
@@ -653,7 +654,7 @@ public sealed class MainWindow : Window
         }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Sounds of skills, spells and effects, mounting and other animations.");
-        ImGui.SameLine();
+        NextOnLine("Crafting", indentX);
         var cr = crafting;
         if (ImGui.Checkbox("Crafting", ref cr))
         {
@@ -663,6 +664,17 @@ public sealed class MainWindow : Window
         }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Sounds of their crafting (synthesis actions and their effects),\nonly while they're crafting.");
+    }
+
+    /// <summary>Puts the next checkbox on the same line when it fits inside the card, otherwise on a new line.</summary>
+    private static void NextOnLine(string nextLabel, float lineStartX)
+    {
+        var style = ImGui.GetStyle();
+        var width = ImGui.GetFrameHeight() + style.ItemInnerSpacing.X + ImGui.CalcTextSize(nextLabel).X;
+        if (ImGui.GetItemRectMax().X + style.ItemSpacing.X + width <= Theme.CardInnerRight)
+            ImGui.SameLine();
+        else
+            ImGui.SetCursorPosX(lineStartX);
     }
 
     private static void Divider()
