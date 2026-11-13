@@ -370,7 +370,10 @@ public sealed class MainWindow : Window
             }
             ImGui.SameLine();
 
-            var w = (Theme.CardInnerRight - ImGui.GetCursorScreenPos().X - spacing * 2) / 3f;
+            var pillW = Theme.StatusBadgeWidth(FontAwesomeIcon.VolumeUp, "Unmuted");
+            var rowAvail = Theme.CardInnerRight - ImGui.GetCursorScreenPos().X;
+            var pillInline = (rowAvail - spacing * 3 - pillW) / 3f >= S(84);
+            var w = pillInline ? (rowAvail - spacing * 3 - pillW) / 3f : (rowAvail - spacing * 2) / 3f;
             var target = Plugin.Targets.Target as Dalamud.Game.ClientState.Objects.SubKinds.IPlayerCharacter;
             var onList = target != null ? ind.Find(target.Name.TextValue, target.HomeWorld.RowId) : null;
             using (ImRaii.Disabled(target == null))
@@ -395,6 +398,18 @@ public sealed class MainWindow : Window
                 selectPeopleTab = true;
                 showWhiteList = true;
             }
+
+            // Whether the ambient sounds are muted right now (just shows it; the switch in the Crowd card turns it on and off).
+            var (stateLabel, stateOn) = StatusText();
+            var stateIcon = !Config.Enabled || !Config.AllEnabled ? FontAwesomeIcon.PowerOff : stateOn ? FontAwesomeIcon.VolumeMute : FontAwesomeIcon.VolumeUp;
+            if (pillInline)
+                ImGui.SameLine();
+            var pillPos = ImGui.GetCursorScreenPos();
+            var shown = Theme.StatusBadgeWidth(stateIcon, stateLabel);
+            ImGui.SetCursorScreenPos(pillPos + new Vector2(Math.Max(0, (pillW - shown) / 2f), 0));
+            Theme.StatusBadge(stateIcon, stateLabel, stateOn, ImGui.GetFrameHeight());
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip($"{Plugin.LastCount} players nearby. Ambient sounds mute at {Config.MuteAtPlayers}.");
         });
     }
 
@@ -444,13 +459,14 @@ public sealed class MainWindow : Window
             var h = ImGui.GetFrameHeight() + S(4);
             var gap = S(8);
             var sw = ImGui.GetFrameHeight() * 0.8f * 1.9f;
-            var bw = sw + gap + Theme.StatusBadgeWidth(icon, label);
+            var badgeW = Theme.StatusBadgeWidth(icon, label);
+            var bw = badgeW + gap + sw;
             var after = ImGui.GetCursorScreenPos();
             var rowPos = new Vector2(Theme.CardTitleRight - bw, top + Math.Min(0, (Theme.CardTitleHeight - h) / 2f));
             ImGui.SetCursorScreenPos(rowPos);
-            DrawPowerSwitch(h);
-            ImGui.SetCursorScreenPos(new Vector2(rowPos.X + sw + gap, rowPos.Y));
             Theme.StatusBadge(icon, label, on, h);
+            ImGui.SetCursorScreenPos(new Vector2(rowPos.X + badgeW + gap, rowPos.Y));
+            DrawPowerSwitch(h);
             ImGui.SetCursorScreenPos(new Vector2(left, Math.Max(after.Y, top + h + S(2))));
             if (!open)
                 return;
@@ -1528,7 +1544,7 @@ public sealed class MainWindow : Window
     {
         ImGuiHelpers.ScaledDummy(2f);
         var spacing = ImGui.GetStyle().ItemSpacing.X;
-        var linkW = Math.Max(S(96), (ImGui.GetContentRegionAvail().X - spacing) / 2f);
+        var linkW = Math.Max(S(80), (ImGui.GetContentRegionAvail().X - spacing * 2) / 3f);
 
         if (Theme.LinkButton("##kofi", FontAwesomeIcon.Coffee, "Ko-fi", rainbow: true, width: linkW))
             Util.OpenLink(Theme.KofiUrl);
