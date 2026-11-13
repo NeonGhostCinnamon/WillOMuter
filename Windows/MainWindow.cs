@@ -151,6 +151,7 @@ public sealed class MainWindow : Window
                 {
                     if (tab.Success)
                     {
+                        currentTab = "Crowd";
                         ImGuiHelpers.ScaledDummy(2f);
                         OffNote();
                         DrawAmbientCard();
@@ -161,6 +162,7 @@ public sealed class MainWindow : Window
                 {
                     if (tab.Success)
                     {
+                        currentTab = "People";
                         ImGuiHelpers.ScaledDummy(2f);
                         OffNote();
                         DrawPeopleCard();
@@ -170,6 +172,7 @@ public sealed class MainWindow : Window
                 {
                     if (tab.Success)
                     {
+                        currentTab = "Emotes";
                         ImGuiHelpers.ScaledDummy(2f);
                         OffNote();
                         DrawEmotesCard();
@@ -179,6 +182,7 @@ public sealed class MainWindow : Window
                 {
                     if (tab.Success)
                     {
+                        currentTab = "Settings";
                         ImGuiHelpers.ScaledDummy(2f);
                         DrawServerBarCard();
                         DrawImportExportCard();
@@ -191,27 +195,28 @@ public sealed class MainWindow : Window
         FitToContent();
     }
 
-    private float lastContentHeight;
+    private string? currentTab;
+    private string? lastTab;
 
     /// <summary>
-    /// A card was just collapsed or expanded: grow or shrink the window by exactly the height the content gained or
-    /// lost, so it never leaves an empty gap and never cuts anything off (a size you dragged it to is kept).
+    /// After a card was collapsed or expanded, and whenever another tab opens: make the window exactly as tall as
+    /// its content (within the minimum size and 95% of the screen).
     /// </summary>
     private void FitToContent()
     {
-        var height = ImGui.GetCursorPosY();
-        if (Theme.CardToggled)
-        {
-            Theme.CardToggled = false;
-            if (lastContentHeight > 0)
-            {
-                var size = ImGui.GetWindowSize();
-                var max = ImGui.GetMainViewport().WorkSize.Y * 0.95f;
-                var h = Math.Clamp(size.Y + (height - lastContentHeight), S(300), Math.Max(S(300), max));
-                sizeOnce = new Vector2(size.X, h) / ImGuiHelpers.GlobalScale;
-            }
-        }
-        lastContentHeight = height;
+        var tabChanged = currentTab != lastTab;
+        var first = lastTab == null;   // the first frame keeps the size the window had when it was closed
+        lastTab = currentTab;
+        var toggled = Theme.CardToggled;
+        Theme.CardToggled = false;
+        if (!toggled && (!tabChanged || first))
+            return;
+
+        var style = ImGui.GetStyle();
+        var height = ImGui.GetCursorPosY() - style.ItemSpacing.Y + style.WindowPadding.Y;
+        var max = ImGui.GetMainViewport().WorkSize.Y * 0.95f;
+        var h = Math.Clamp(height, S(300), Math.Max(S(300), max));
+        sizeOnce = new Vector2(ImGui.GetWindowSize().X, h) / ImGuiHelpers.GlobalScale;
     }
 
     // ---------------------------------------------------------------- header
