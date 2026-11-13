@@ -59,6 +59,22 @@ public sealed class Plugin : IDalamudPlugin
     /// <summary>Nunito Black at heading size (the website's font), so the title is sharp.</summary>
     public IFontHandle TitleFont { get; }
 
+    /// <summary>The Discord logo for the footer button (null when the file is missing).</summary>
+    public Dalamud.Interface.Textures.ISharedImmediateTexture? DiscordLogo { get; private set; }
+
+    private void LoadDiscordLogo(ITextureProvider textures)
+    {
+        try
+        {
+            DiscordLogo = textures.GetFromFile(Path.Combine(PluginInterface.AssemblyLocation.DirectoryName ?? string.Empty, "images", "discord.png"));
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Couldn't load the Discord logo; the footer button shows without it.");
+        }
+    }
+
+
     private DateTime lastCheck = DateTime.MinValue;
     private DateTime belowSince = DateTime.MinValue;
 
@@ -86,6 +102,7 @@ public sealed class Plugin : IDalamudPlugin
             Restore();
         }
 
+        LoadDiscordLogo(Textures);
         var fontPath = Path.Combine(PluginInterface.AssemblyLocation.DirectoryName ?? string.Empty, "Nunito-Black.ttf");
         TitleFont = PluginInterface.UiBuilder.FontAtlas.NewDelegateFontHandle(e => e.OnPreBuild(tk =>
         {

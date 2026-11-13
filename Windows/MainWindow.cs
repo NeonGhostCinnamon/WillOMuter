@@ -1555,5 +1555,10 @@ public sealed class MainWindow : Window
             Util.OpenLink(GitHubUrl);
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip(GitHubUrl);
+        ImGui.SameLine();
+        if (Theme.DiscordButton("##discord", plugin.DiscordLogo, linkW))
+            Util.OpenLink(Theme.DiscordUrl);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Join the Will-o Discord");
     }
 }
