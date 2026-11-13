@@ -103,6 +103,14 @@ public sealed class Plugin : IDalamudPlugin
             config.Version = 3;
             PluginInterface.SavePluginConfig(config);
         }
+
+        // v4: "friends and Free Company members" became two choices; keep both as they were.
+        if (config.Version < 4)
+        {
+            config.RaceSkipFreeCompany = config.RaceSkipFriends;
+            config.Version = 4;
+            PluginInterface.SavePluginConfig(config);
+        }
         try
         {
             dtr = DtrBar.Get(IsTestBuild ? "Will-o-Muter (Test)" : "Will-o-Muter");

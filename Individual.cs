@@ -45,6 +45,9 @@ public class MutedPerson
     /// <summary>Mute their skill, action and animation sounds (not working yet: coming in a later test build).</summary>
     public bool MuteSkills { get; set; } = true;
 
+    /// <summary>Mute the sounds of their crafting (synthesis actions and their effects).</summary>
+    public bool MuteCrafting { get; set; } = true;
+
     /// <summary>Also hide their emote messages in chat ("Kai waves to you.").</summary>
     public bool HideEmoteMessages { get; set; }
 
@@ -79,6 +82,7 @@ public class RaceRule
     public bool MuteVoices { get; set; } = true;
     public bool MuteFootsteps { get; set; } = true;
     public bool MuteSkills { get; set; } = true;
+    public bool MuteCrafting { get; set; } = true;
 }
 
 /// <summary>
@@ -86,7 +90,7 @@ public class RaceRule
 /// character sounds (emote voices, battle shouts and the like) through one function; Will-o-Muter steps in front of
 /// it and skips the sound when the character belongs to someone on the list. The function comes from the
 /// FFXIVClientStructs library that ships with Dalamud, so it's kept up to date with game patches.
-/// Footsteps and ability/animation sounds use other functions and aren't covered yet.
+/// Footsteps, skill/animation and crafting sounds go through other functions, intercepted further down.
 /// </summary>
 public sealed unsafe class Individual : IDisposable
 {
@@ -135,6 +139,9 @@ public sealed unsafe class Individual : IDisposable
     private HashSet<nint> mutedSkills = new();
     private HashSet<nint> mutedSkillDraw = new();   // the same characters' draw objects (another way to recognise them)
     private Dictionary<nint, nint> emoteDrawOwner = new(); // draw object -> character, for people with "Emotes" muted
+    private HashSet<nint> mutedCrafting = new();    // characters whose crafting is muted (only while they craft)
+    private Dictionary<nint, nint> craftDrawOwner = new(); // draw object -> character, for the same people
+    private HashSet<nint> emoteExempt = new();      // party, friends or FC members whose emotes play anyway (Emotes tab)
 
     private nint localPlayer;
     // Copy of the Emotes tab's choices for the sound functions (some run off the game's main thread, so they
@@ -330,7 +337,7 @@ public sealed unsafe class Individual : IDisposable
 
     private static string Cap(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
 
-    /// <summary>On the game's thread: a few times a second, work out whose voices, footsteps and skill sounds are muted.</summary>
+    /// <summary>On the game's thread: a few times a second, work out whose voices, footsteps, skill and crafting sounds are muted.</summary>
     public void Update()
     {
         localPlayer = objects.LocalPlayer?.Address ?? 0;
@@ -338,16 +345,20 @@ public sealed unsafe class Individual : IDisposable
         if (on && (!emotesOn || !mutedEmotes.SetEquals(config.MutedEmotes)))
             mutedEmotes = new HashSet<uint>(config.MutedEmotes);
         emotesOn = on;
+        var emoteSkips = on && (config.EmotesSkipParty || config.EmotesSkipFriends || config.EmotesSkipFreeCompany);
         var listOn = config.AllEnabled && config.IndividualEnabled && config.MutedPeople.Count > 0;
         var rulesOn = config.AllEnabled && config.RaceRulesEnabled
-                      && config.RaceRules.Any(r => r.Enabled && (r.MuteVoices || r.MuteFootsteps || r.MuteSkills));
-        if (!listOn && !rulesOn)
+                      && config.RaceRules.Any(r => r.Enabled && (r.MuteVoices || r.MuteFootsteps || r.MuteSkills || r.MuteCrafting));
+        if (!listOn && !rulesOn && !emoteSkips)
         {
             if (mutedObjects.Count > 0) mutedObjects = new HashSet<nint>();
             if (mutedFootsteps.Count > 0) mutedFootsteps = new HashSet<nint>();
             if (mutedSkills.Count > 0) mutedSkills = new HashSet<nint>();
             if (mutedSkillDraw.Count > 0) mutedSkillDraw = new HashSet<nint>();
             if (emoteDrawOwner.Count > 0) emoteDrawOwner = new Dictionary<nint, nint>();
+            if (mutedCrafting.Count > 0) mutedCrafting = new HashSet<nint>();
+            if (craftDrawOwner.Count > 0) craftDrawOwner = new Dictionary<nint, nint>();
+            if (emoteExempt.Count > 0) emoteExempt = new HashSet<nint>();
             return;
         }
 
@@ -357,12 +368,14 @@ public sealed unsafe class Individual : IDisposable
         lastScan = now;
 
         var local = objects.LocalPlayer;
-        var myTag = local?.CompanyTag.TextValue ?? string.Empty;
         var voices = new HashSet<nint>();
         var footsteps = new HashSet<nint>();
         var skills = new HashSet<nint>();
         var skillDraw = new HashSet<nint>();
         var emoteDraw = new Dictionary<nint, nint>();
+        var crafting = new HashSet<nint>();
+        var craftDraw = new Dictionary<nint, nint>();
+        var exempt = new HashSet<nint>();
         foreach (var obj in objects)
         {
             if (obj is not IPlayerCharacter pc || pc.Address == IntPtr.Zero)
@@ -370,34 +383,38 @@ public sealed unsafe class Individual : IDisposable
             var name = pc.Name.TextValue;
             var world = pc.HomeWorld.RowId;
             var c = (Character*)pc.Address;
+            var isMe = pc.Address == local?.Address;
 
-            bool v = false, f = false, k = false;
+            // Emotes tab: party, friends and FC members keep their emotes (you go by "Also when I use them").
+            if (emoteSkips && !isMe && Skipped(pc, local, config.EmotesSkipParty, config.EmotesSkipFriends, config.EmotesSkipFreeCompany))
+                AddWithParts(exempt, c);
+
+            if (!listOn && !rulesOn)
+                continue;
+
+            bool v = false, f = false, k = false, cr = false;
             if (listOn && Find(name, world) is { Enabled: true } p)
             {
                 v = p.MuteVoices;
                 f = p.MuteFootsteps;
                 k = p.MuteSkills;
+                cr = p.MuteCrafting;
             }
 
             // Race and gender rules: never for yourself, WhiteList people, and (when chosen) party, friends and FC.
-            if (rulesOn && pc.Address != local?.Address && FindWhite(name, world) == null)
+            if (rulesOn && !isMe && FindWhite(name, world) == null
+                && !Skipped(pc, local, config.RaceSkipParty, config.RaceSkipFriends, config.RaceSkipFreeCompany))
             {
-                var flags = pc.StatusFlags;
-                var skip = (config.RaceSkipParty && (flags.HasFlag(StatusFlags.PartyMember) || flags.HasFlag(StatusFlags.AllianceMember)))
-                           || (config.RaceSkipFriends && (flags.HasFlag(StatusFlags.Friend)
-                               || (myTag.Length > 0 && pc.CompanyTag.TextValue == myTag)));
-                if (!skip)
+                var race = c->DrawData.CustomizeData.Data[0];
+                var gender = c->DrawData.CustomizeData.Data[1];
+                foreach (var r in config.RaceRules)
                 {
-                    var race = c->DrawData.CustomizeData.Data[0];
-                    var gender = c->DrawData.CustomizeData.Data[1];
-                    foreach (var r in config.RaceRules)
-                    {
-                        if (!r.Enabled || (r.Race != 0 && r.Race != race) || (r.Gender >= 0 && r.Gender != gender))
-                            continue;
-                        v |= r.MuteVoices;
-                        f |= r.MuteFootsteps;
-                        k |= r.MuteSkills;
-                    }
+                    if (!r.Enabled || (r.Race != 0 && r.Race != race) || (r.Gender >= 0 && r.Gender != gender))
+                        continue;
+                    v |= r.MuteVoices;
+                    f |= r.MuteFootsteps;
+                    k |= r.MuteSkills;
+                    cr |= r.MuteCrafting;
                 }
             }
 
@@ -417,13 +434,44 @@ public sealed unsafe class Individual : IDisposable
                 if (c->Mount.MountObject != null && c->Mount.MountObject->GameObject.DrawObject != null)
                     skillDraw.Add((nint)c->Mount.MountObject->GameObject.DrawObject);
             }
+            if (cr)
+            {
+                crafting.Add((nint)c);
+                if (c->GameObject.DrawObject != null)
+                    craftDraw[(nint)c->GameObject.DrawObject] = (nint)c;
+            }
         }
         mutedObjects = voices;
         mutedFootsteps = footsteps;
         mutedSkills = skills;
         mutedSkillDraw = skillDraw;
         emoteDrawOwner = emoteDraw;
+        mutedCrafting = crafting;
+        craftDrawOwner = craftDraw;
+        emoteExempt = exempt;
     }
+
+    /// <summary>Is this player in your party or alliance, a friend, or in your Free Company (each only when chosen)?</summary>
+    private static bool Skipped(IPlayerCharacter pc, IPlayerCharacter? local, bool party, bool friends, bool freeCompany)
+    {
+        var flags = pc.StatusFlags;
+        if (party && (flags.HasFlag(StatusFlags.PartyMember) || flags.HasFlag(StatusFlags.AllianceMember)))
+            return true;
+        if (friends && flags.HasFlag(StatusFlags.Friend))
+            return true;
+        if (freeCompany && local != null)
+        {
+            // Same company tag on the same home server (a Free Company never spans servers).
+            var myTag = local.CompanyTag.TextValue;
+            if (myTag.Length > 0 && pc.CompanyTag.TextValue == myTag && pc.HomeWorld.RowId == local.HomeWorld.RowId)
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>Is this character crafting right now, with their crafting sounds muted?</summary>
+    private bool CraftingMuted(nint character)
+        => mutedCrafting.Contains(character) && ((Character*)character)->Mode == CharacterModes.Crafting;
 
     private static void AddWithParts(HashSet<nint> set, Character* c)
     {
@@ -437,12 +485,12 @@ public sealed unsafe class Individual : IDisposable
     private bool EmoteMuted(Character* owner)
         => emotesOn
            && owner->GameObject.ObjectKind == FFXIVClientStructs.FFXIV.Client.Game.Object.ObjectKind.Pc
-           && (config.EmotesMuteSelf || (nint)owner != localPlayer)
+           && ((nint)owner == localPlayer ? config.EmotesMuteSelf : !emoteExempt.Contains((nint)owner))
            && owner->EmoteController.EmoteId != 0
            && mutedEmotes.Contains(owner->EmoteController.EmoteId);
 
     /// <summary>Anything to check at all? When nobody nearby is muted, the sound functions just play.</summary>
-    private bool AnythingMuted => emotesOn || mutedObjects.Count > 0 || mutedSkills.Count > 0 || mutedSkillDraw.Count > 0;
+    private bool AnythingMuted => emotesOn || mutedObjects.Count > 0 || mutedSkills.Count > 0 || mutedSkillDraw.Count > 0 || mutedCrafting.Count > 0;
 
     /// <summary>
     /// The sound functions run many times a frame; if something keeps failing, write it to the log at most once
@@ -461,14 +509,16 @@ public sealed unsafe class Individual : IDisposable
     {
         try
         {
-            if (clipScheduler != 0 && (mutedObjects.Count > 0 || emotesOn))
+            if (clipScheduler != 0 && (mutedObjects.Count > 0 || emotesOn || mutedCrafting.Count > 0))
             {
                 var owner = ClipOwner(clipScheduler);
                 if (owner != null)
                 {
                     var emote = owner->EmoteController.EmoteId;
-                    // Only while they're doing an emote, so their skills, mount and other effects stay as they are.
-                    var mute = emote != 0 && (mutedObjects.Contains((nint)owner) || EmoteMuted(owner));
+                    // Only while they're doing an emote (or crafting, with crafting muted), so their skills, mount
+                    // and other effects stay as they are. Crafting actions play their sounds from these steps.
+                    var mute = (emote != 0 && (mutedObjects.Contains((nint)owner) || EmoteMuted(owner)))
+                               || CraftingMuted((nint)owner);
                     if (mute)
                     {
                         SkippedSounds++;
@@ -532,13 +582,16 @@ public sealed unsafe class Individual : IDisposable
                     mute = mutedSkills.Contains(ownerPtr)
                            // "Emotes" for that person: their emote's sound effects (like clapping) too.
                            || (doingEmote && mutedObjects.Contains(ownerPtr))
-                           || (owner->IsCharacter() && EmoteMuted((Character*)owner));
+                           || (owner->IsCharacter() && EmoteMuted((Character*)owner))
+                           // "Crafting" for that person: everything that plays while they craft.
+                           || (owner->IsCharacter() && CraftingMuted(ownerPtr));
                 }
                 else if (draw != 0)
                 {
                     // Only the model is known: the character it belongs to (from the last check) decides.
                     mute = mutedSkillDraw.Contains(draw)
-                           || (emoteDrawOwner.TryGetValue(draw, out var ch) && ((Character*)ch)->EmoteController.EmoteId != 0);
+                           || (emoteDrawOwner.TryGetValue(draw, out var ch) && ((Character*)ch)->EmoteController.EmoteId != 0)
+                           || (craftDrawOwner.TryGetValue(draw, out var crafter) && CraftingMuted(crafter));
                 }
                 if (mute)
                 {
@@ -584,7 +637,7 @@ public sealed unsafe class Individual : IDisposable
     {
         try
         {
-            if (self != null && self->OwnerObject != null && (mutedObjects.Count > 0 || emotesOn))
+            if (self != null && self->OwnerObject != null && (mutedObjects.Count > 0 || emotesOn || mutedCrafting.Count > 0))
             {
                 var owner = self->OwnerObject;
                 if (mutedObjects.Count > 0 && mutedObjects.Contains((nint)owner))
@@ -595,6 +648,13 @@ public sealed unsafe class Individual : IDisposable
 
                 // Emotes muted for everyone: the emote this player is doing right now.
                 if (EmoteMuted(owner))
+                {
+                    SkippedSounds++;
+                    return 0;
+                }
+
+                // Crafting muted for this person, and they're crafting.
+                if (mutedCrafting.Count > 0 && CraftingMuted((nint)owner))
                 {
                     SkippedSounds++;
                     return 0;

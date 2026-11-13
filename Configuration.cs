@@ -7,7 +7,7 @@ namespace WillOMuter;
 [Serializable]
 public class Configuration : IPluginConfiguration
 {
-    public int Version { get; set; } = 3;
+    public int Version { get; set; } = 4;
 
     /// <summary>Everything in Will-o-Muter on or off (crowd, people, races, emotes and the server info bar).</summary>
     public bool AllEnabled { get; set; } = true;
@@ -81,11 +81,19 @@ public class Configuration : IPluginConfiguration
     /// <summary>Also mute them when you use them yourself.</summary>
     public bool EmotesMuteSelf { get; set; } = true;
 
+    /// <summary>Keep the emotes of party (and alliance) members, friends or Free Company members playing.</summary>
+    public bool EmotesSkipParty { get; set; }
+    public bool EmotesSkipFriends { get; set; }
+    public bool EmotesSkipFreeCompany { get; set; }
+
     // ---- race and gender rules
     public bool RaceRulesEnabled { get; set; }
     public List<RaceRule> RaceRules { get; set; } = new();
     public bool RaceSkipParty { get; set; } = true;
     public bool RaceSkipFriends { get; set; }
+
+    /// <summary>Free Company members (before version 4 they came with <see cref="RaceSkipFriends"/>).</summary>
+    public bool RaceSkipFreeCompany { get; set; }
 
     // Persisted so a crash while muted doesn't leave your ambient volume at 0.
     public bool IsMuted { get; set; } = false;

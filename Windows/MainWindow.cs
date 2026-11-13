@@ -559,7 +559,7 @@ public sealed class MainWindow : Window
                 if (TextButton("Remove"))
                     remove = r;
 
-                SoundChoices(r.MuteVoices, v => { r.MuteVoices = v; plugin.Individual.Refresh(); }, r.MuteFootsteps, v => r.MuteFootsteps = v, r.MuteSkills, v => r.MuteSkills = v);
+                SoundChoices(r.MuteVoices, v => { r.MuteVoices = v; plugin.Individual.Refresh(); }, r.MuteFootsteps, v => r.MuteFootsteps = v, r.MuteSkills, v => r.MuteSkills = v, r.MuteCrafting, v => r.MuteCrafting = v);
             }
             if (remove != null)
             {
@@ -579,16 +579,23 @@ public sealed class MainWindow : Window
 
             ImGuiHelpers.ScaledDummy(2f);
             var party = Config.RaceSkipParty;
-            if (ImGui.Checkbox("Don't apply to my party members", ref party))
+            if (ImGui.Checkbox("Don't apply to party members", ref party))
             {
                 Config.RaceSkipParty = party;
                 plugin.Save();
                 plugin.Individual.Refresh();
             }
             var friends = Config.RaceSkipFriends;
-            if (ImGui.Checkbox("Don't apply to friends and Free Company members", ref friends))
+            if (ImGui.Checkbox("Don't apply to friends", ref friends))
             {
                 Config.RaceSkipFriends = friends;
+                plugin.Save();
+                plugin.Individual.Refresh();
+            }
+            var fc = Config.RaceSkipFreeCompany;
+            if (ImGui.Checkbox("Don't apply to Free Company members", ref fc))
+            {
+                Config.RaceSkipFreeCompany = fc;
                 plugin.Save();
                 plugin.Individual.Refresh();
             }
@@ -596,7 +603,7 @@ public sealed class MainWindow : Window
     }
 
     /// <summary>The three sound checkboxes; footsteps and skills are greyed out until they work.</summary>
-    private void SoundChoices(bool voices, Action<bool> setVoices, bool footsteps, Action<bool> setFootsteps, bool skills, Action<bool> setSkills)
+    private void SoundChoices(bool voices, Action<bool> setVoices, bool footsteps, Action<bool> setFootsteps, bool skills, Action<bool> setSkills, bool crafting, Action<bool> setCrafting)
     {
         ImGui.SetCursorPosX(ImGui.GetCursorPosX() + ImGui.GetFrameHeight() * 1.6f);
         var v = voices;
@@ -625,6 +632,16 @@ public sealed class MainWindow : Window
         }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Sounds of skills, spells and effects, mounting and other animations.");
+        ImGui.SameLine();
+        var cr = crafting;
+        if (ImGui.Checkbox("Crafting", ref cr))
+        {
+            setCrafting(cr);
+            plugin.Save();
+            plugin.Individual.Refresh();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Sounds of their crafting (synthesis actions and their effects),\nonly while they're crafting.");
     }
 
     private static void Divider()
@@ -1101,7 +1118,7 @@ public sealed class MainWindow : Window
                     ToggleOpen(p.Key);
 
                 var muted = Config.AllEnabled && Config.IndividualEnabled && p.Enabled
-                            && (p.MuteVoices || p.MuteFootsteps || p.MuteSkills);
+                            && (p.MuteVoices || p.MuteFootsteps || p.MuteSkills || p.MuteCrafting);
                 var tag = muted ? "Muted" : "Not muted";
                 var tagWidth = ImGui.CalcTextSize(tag).X + S(14);
                 ImGui.SameLine();
@@ -1113,7 +1130,7 @@ public sealed class MainWindow : Window
                     continue;
 
                 // The fold-out part with this person's options.
-                SoundChoices(p.MuteVoices, v => { p.MuteVoices = v; ind.Refresh(); }, p.MuteFootsteps, v => p.MuteFootsteps = v, p.MuteSkills, v => p.MuteSkills = v);
+                SoundChoices(p.MuteVoices, v => { p.MuteVoices = v; ind.Refresh(); }, p.MuteFootsteps, v => p.MuteFootsteps = v, p.MuteSkills, v => p.MuteSkills = v, p.MuteCrafting, v => p.MuteCrafting = v);
                 ImGui.SetCursorPosX(ImGui.GetCursorPosX() + ImGui.GetFrameHeight() * 1.6f);
                 var hide = p.HideEmoteMessages;
                 if (ImGui.Checkbox("Hide their emote messages in chat", ref hide))
@@ -1136,7 +1153,7 @@ public sealed class MainWindow : Window
             var broken = new List<string>();
             if (!ind.VoiceMutingWorks) broken.Add("emotes");
             if (!ind.FootstepMutingWorks) broken.Add("footsteps");
-            if (!ind.SkillMutingWorks) broken.Add("skills and emote sound effects");
+            if (!ind.SkillMutingWorks) broken.Add("skills, crafting and emote sound effects");
             if (!ind.EmoteEffectMutingWorks) broken.Add("emote sound effects");
             if (broken.Count > 0)
                 Theme.Wrapped($"Muting {string.Join(", ", broken)} isn't working right now (most likely a game patch moved things; it comes back with an update).", Theme.Amber);
@@ -1192,6 +1209,15 @@ public sealed class MainWindow : Window
             .OrderBy(e => e.Name)
             .ToList();
 
+    private void EmoteSkip(string label, bool value, Action<bool> set)
+    {
+        if (!ImGui.Checkbox(label, ref value))
+            return;
+        set(value);
+        plugin.Save();
+        plugin.Individual.Refresh();
+    }
+
     private void DrawEmotesCard()
     {
         Theme.Card("emotes", () =>
@@ -1219,12 +1245,15 @@ public sealed class MainWindow : Window
                 Config.EmotesMuteSelf = self;
                 plugin.Save();
             }
+            EmoteSkip("Don't apply to party members", Config.EmotesSkipParty, v => Config.EmotesSkipParty = v);
+            EmoteSkip("Don't apply to friends", Config.EmotesSkipFriends, v => Config.EmotesSkipFriends = v);
+            EmoteSkip("Don't apply to Free Company members", Config.EmotesSkipFreeCompany, v => Config.EmotesSkipFreeCompany = v);
 
             ImGuiHelpers.ScaledDummy(2f);
-            ImGui.SetNextItemWidth(w - S(150));
+            ImGui.SetNextItemWidth(Math.Max(S(80), w - ImGui.CalcTextSize($"Show muted only ({Config.MutedEmotes.Count})").X - ImGui.GetFrameHeight() - S(20)));
             ImGui.InputTextWithHint("##emotesearch", "Search emotes (name or /command)...", ref emoteSearch, 40);
             ImGui.SameLine();
-            ImGui.Checkbox($"Muted only ({Config.MutedEmotes.Count})", ref emotesOnlyMuted);
+            ImGui.Checkbox($"Show muted only ({Config.MutedEmotes.Count})", ref emotesOnlyMuted);
 
             var list = Emotes().Where(e =>
                 (!emotesOnlyMuted || Config.MutedEmotes.Contains(e.Id))
