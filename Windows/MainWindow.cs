@@ -359,11 +359,9 @@ public sealed class MainWindow : Window
             var spacing = ImGui.GetStyle().ItemSpacing.X;
             var d = ImGui.GetFrameHeight();
             var all = Config.AllEnabled;
-            var power = all
-                ? Theme.IconCircle("##all", FontAwesomeIcon.PowerOff, Theme.Text, d)
-                : Theme.IconCircle("##all", FontAwesomeIcon.PowerOff, Theme.OnPink, d, filled: true);
+            var power = Switch("##all", all);
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip(all ? "Turn everything in Will-o-Muter off\n(crowd, people, races, emotes and the server info bar)." : "Will-o-Muter is off. Click to turn everything back on.");
+                ImGui.SetTooltip(all ? "On. Click to turn everything in Will-o-Muter off\n(crowd, people, races, emotes and the server info bar)." : "Will-o-Muter is off. Click to turn everything back on.");
             if (power)
             {
                 Config.AllEnabled = !all;
@@ -445,11 +443,13 @@ public sealed class MainWindow : Window
             var icon = !Config.Enabled ? FontAwesomeIcon.PowerOff : on ? FontAwesomeIcon.VolumeMute : FontAwesomeIcon.VolumeUp;
             var h = ImGui.GetFrameHeight() + S(4);
             var gap = S(8);
-            var bw = h + gap + Theme.StatusBadgeWidth(icon, label);
+            var sw = ImGui.GetFrameHeight() * 0.8f * 1.9f;
+            var bw = sw + gap + Theme.StatusBadgeWidth(icon, label);
             var after = ImGui.GetCursorScreenPos();
-            ImGui.SetCursorScreenPos(new Vector2(Theme.CardTitleRight - bw, top + Math.Min(0, (Theme.CardTitleHeight - h) / 2f)));
-            DrawPowerButton(h);
-            ImGui.SameLine(0, gap);
+            var rowPos = new Vector2(Theme.CardTitleRight - bw, top + Math.Min(0, (Theme.CardTitleHeight - h) / 2f));
+            ImGui.SetCursorScreenPos(rowPos);
+            DrawPowerSwitch(h);
+            ImGui.SetCursorScreenPos(new Vector2(rowPos.X + sw + gap, rowPos.Y));
             Theme.StatusBadge(icon, label, on, h);
             ImGui.SetCursorScreenPos(new Vector2(left, Math.Max(after.Y, top + h + S(2))));
             if (!open)
@@ -696,15 +696,15 @@ public sealed class MainWindow : Window
         return hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left);
     }
 
-    /// <summary>Round power button next to the status badge: turns Will-o-Muter off, or (filled pink) back on.</summary>
-    private void DrawPowerButton(float diameter)
+    /// <summary>On/off switch next to the status badge: turns crowd muting off or back on.</summary>
+    private void DrawPowerSwitch(float rowHeight)
     {
         var enabled = Config.Enabled;
-        var clicked = enabled
-            ? Theme.IconCircle("##power", FontAwesomeIcon.PowerOff, Theme.Text, diameter)
-            : Theme.IconCircle("##power", FontAwesomeIcon.PowerOff, Theme.OnPink, diameter, filled: true);
+        var pos = ImGui.GetCursorScreenPos();
+        ImGui.SetCursorScreenPos(pos + new Vector2(0, (rowHeight - ImGui.GetFrameHeight()) / 2f));
+        var clicked = Switch("##power", enabled);
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(enabled ? "Turn crowd muting off (the ambient sounds stay as they are)" : "Turn crowd muting back on");
+            ImGui.SetTooltip(enabled ? "On. Click to turn crowd muting off (the ambient sounds stay as they are)." : "Off. Click to turn crowd muting back on.");
         if (clicked)
         {
             Config.Enabled = !enabled;
